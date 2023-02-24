@@ -72,9 +72,8 @@ static WDL_IntKeyedArray<WDL_String*> g_cmdFiles(freeCmdFilesValue);
 #endif
 static WDL_IntKeyedArray<COMMAND_T*> g_commands; // no valdispose (cmds can be allocated in different ways)
 
-int g_iFirstCommand = 0;
-int g_iLastCommand = 0;
-
+static int g_iFirstCommand;
+static int g_iLastCommand;
 
 bool hookCommandProc(int iCmd, int flag)
 {
@@ -102,7 +101,7 @@ bool hookCommandProc(int iCmd, int flag)
 		if (BR_SwsActionHook(cmd, flag, NULL))
 			return true;
 
-		if (!cmd->uniqueSectionId && cmd->accel.accel.cmd==iCmd && cmd->doCommand)
+		if (!cmd->uniqueSectionId && cmd->cmdId == iCmd && cmd->doCommand)
 		{
 			if (sReentrantCmds.Find(cmd->id)<0)
 			{
@@ -141,7 +140,7 @@ bool hookCommandProc2(KbdSectionInfo* sec, int cmdId, int val, int valhw, int re
 	// Ignore commands that don't have anything to do with us from this point forward
 	if (COMMAND_T* cmd = SWSGetCommandByID(cmdId))
 	{
-		if (cmd->uniqueSectionId==sec->uniqueID && cmd->accel.accel.cmd==cmdId)
+		if (cmd->uniqueSectionId==sec->uniqueID && cmd->cmdId==cmdId)
 		{
 			// job for hookCommandProc?
 			// note: we could perform cmd->doCommand() here, but we'd loose the "flag" param value
@@ -198,7 +197,7 @@ int toggleActionHook(int iCmd)
 	static WDL_PtrList<const char> sReentrantCmds;
 	if (COMMAND_T* cmd = SWSGetCommandByID(iCmd))
 	{
-		if (cmd->accel.accel.cmd==iCmd && cmd->getEnabled)
+		if (cmd->cmdId==iCmd && cmd->getEnabled)
 		{
 			if (sReentrantCmds.Find(cmd->id) == -1)
 			{
@@ -250,7 +249,7 @@ int SWSRegisterCmd(COMMAND_T* pCommand, const char* cFile, int cmdId, bool local
 	}
 	else
 		cmdId = 0;
-	pCommand->accel.accel.cmd = cmdId;
+	pCommand->cmdId = cmdId;
 
 	// now that it is registered, restore the default action name
 	if (pCommand->accel.desc != defaultName) pCommand->accel.desc = defaultName;
@@ -265,7 +264,7 @@ int SWSRegisterCmd(COMMAND_T* pCommand, const char* cFile, int cmdId, bool local
 	g_cmdFiles.Insert(cmdId, new WDL_String(cFile));
 #endif
 
-	return pCommand->accel.accel.cmd;
+	return pCommand->cmdId;
 }
 
 // For each item in table call SWSRegisterCommand
@@ -307,25 +306,27 @@ bool SWSFreeUnregisterDynamicCmd(int id)
 	return false;
 }
 
+void SWSUnregisterCmdImpl(COMMAND_T* ct)
+{
+	if (!ct->uniqueSectionId && ct->doCommand)
+	{
+		plugin_register("-gaccel", &ct->accel);
+	}
+	else if (ct->onAction)
+	{
+		static custom_action_register_t s;
+		s.idStr = ct->id;
+		s.uniqueSectionId = ct->uniqueSectionId;
+		plugin_register("-custom_action", (void*)&s);
+	}
+}
+
 // Returns the COMMAND_T entry (so it can be freed if necessary)
 COMMAND_T* SWSUnregisterCmd(int id)
 {
 	if (COMMAND_T* ct = g_commands.Get(id, NULL))
 	{
-		if (!ct->uniqueSectionId && ct->doCommand)
-		{
-			plugin_register("-gaccel", &ct->accel);
-/* this is no-op ATM
-			plugin_register("-command_id", &id);
-*/
-		}
-		else if (ct->onAction)
-		{
-			static custom_action_register_t s;
-			s.idStr = ct->id;
-			s.uniqueSectionId = ct->uniqueSectionId;
-			plugin_register("-custom_action", (void*)&s);
-		}
+		SWSUnregisterCmdImpl(ct);
 		g_commands.Delete(id);
 #ifdef ACTION_DEBUG
 		g_cmdFiles.Delete(id);
@@ -336,8 +337,10 @@ COMMAND_T* SWSUnregisterCmd(int id)
 }
 
 void UnregisterAllCmds() {
-	for (int i=g_iFirstCommand; i<=g_iLastCommand; i++)
-		SWSUnregisterCmd(i);
+	for (int i = 0; i < g_commands.GetSize(); ++i) {
+		SWSUnregisterCmdImpl(*g_commands.EnumeratePtr(i));
+	}
+	g_commands.DeleteAll();
 }
 
 #ifdef ACTION_DEBUG
@@ -358,8 +361,8 @@ void ActionsList(COMMAND_T*)
 			{
 				if (COMMAND_T* cmd = g_commands.Enumerate(i, NULL, NULL))
 				{
-					WDL_String* pFn = g_cmdFiles.Get(cmd->accel.accel.cmd, NULL);
-					snprintf(cBuf, sizeof(cBuf), "\"%s\",%s,%d,_%s\n", cmd->accel.desc, pFn ? pFn->Get() : "", cmd->accel.accel.cmd, cmd->id);
+					WDL_String* pFn = g_cmdFiles.Get(cmd->cmdId, NULL);
+					snprintf(cBuf, sizeof(cBuf), "\"%s\",%s,%d,_%s\n", cmd->accel.desc, pFn ? pFn->Get() : "", cmd->cmdId, cmd->id);
 					fputs(cBuf, f);
 				}
 			}
@@ -368,6 +371,11 @@ void ActionsList(COMMAND_T*)
 	}
 }
 #endif
+
+COMMAND_T** SWSGetCommand(const int index)
+{
+	return g_commands.EnumeratePtr(index);
+}
 
 //JFB questionnable func: ok most of the time but, for ex.,
 // 2 different cmds can share the same function pointer cmd->doCommand
@@ -381,7 +389,7 @@ int SWSGetCommandID(void (*cmdFunc)(COMMAND_T*), INT_PTR user, const char** pMen
 			{
 				if (pMenuText)
 					*pMenuText = cmd->menuText;
-				return cmd->accel.accel.cmd;
+				return cmd->cmdId;
 			}
 		}
 	}
@@ -425,7 +433,7 @@ HMENU SWSCreateMenuFromCommandTable(COMMAND_T pCommands[], HMENU hMenu, int* iIn
 				AddSubMenu(hMenu, hSubMenu, __localizeFunc(name,"sws_menu",0));
 			}
 			else
-				AddToMenu(hMenu, __localizeFunc(name,"sws_menu",0), pCommands[i].accel.accel.cmd);
+				AddToMenu(hMenu, __localizeFunc(name,"sws_menu",0), pCommands[i].cmdId);
 		}
 		i++;
 	}
@@ -479,8 +487,8 @@ public:
 	const char *GetConfigString() { return ""; }
 
 	bool m_bChanged;
-	int m_iACIgnore;
-	SWSTimeSlice() : m_bChanged(false), m_iACIgnore(0) {}
+	int m_iACIgnore, m_iExtColorEvents;
+	SWSTimeSlice() : m_bChanged(false), m_iACIgnore(0), m_iExtColorEvents(0) {}
 
 	void Run() // BR: Removed some stuff from here and made it use plugin_register("timer"/"-timer") - it's the same thing as this but it enables us to remove unused stuff completely
 	{          // I guess we could do the rest too (and add user options to enable where needed)...
@@ -496,6 +504,14 @@ public:
 			UpdateSnapshotsDialog();
 			ProjectListUpdate();
 		}
+
+		// Preventing any possible edge cases where not all track data was set when
+		// the first CSURF_EXT_{SETFXCHANGE,SETINPUTMONITOR} notification is sent.
+		// Applying the AutoColor rules asynchronously on the next timer cycle (now).
+		if (m_iExtColorEvents > 1)
+			AutoColorTrack(false);
+
+		m_iExtColorEvents = 0;
 	}
 
 	void SetPlayState(bool play, bool pause, bool rec)
@@ -552,6 +568,19 @@ public:
 	{
 		BR_CSurf_Extended(call, parm1, parm2, parm3);
 		SNM_CSurfExtended(call, parm1, parm2, parm3);
+
+		switch(call)
+		{
+		case CSURF_EXT_SETFXCHANGE:
+		case CSURF_EXT_SETINPUTMONITOR: // input/output change
+			// All affected tracks appear to have been already updated when the first
+			// notification is sent. Run() will call AutoColorTrack again later just
+			// in case this isn't always true.
+			if (m_iExtColorEvents++ == 0)
+				AutoColorTrack(false);
+			break;
+		}
+
 		return 0;
 	}
 };
@@ -751,6 +780,7 @@ error:
 		IMPAPI(DeleteEnvelopePointRange); // v5pre5+
 		IMPAPI(DeleteEnvelopePointRangeEx); // v5.4pre3+
 		IMPAPI(DeleteActionShortcut);
+		IMPAPI(DeleteExtState);
 		IMPAPI(DeleteProjectMarker);
 		IMPAPI(DeleteProjectMarkerByIndex);
 		IMPAPI(DeleteTakeStretchMarkers);
@@ -841,6 +871,7 @@ error:
 		IMPAPI(GetNumTracks);
 		IMPAPI(GetOutputChannelName);
 		IMPAPI(GetPeakFileName);
+		IMPAPI(GetPeakFileNameEx);
 		IMPAPI(GetPeaksBitmap);
 		IMPAPI(GetPlayPosition);
 		IMPAPI(GetPlayPosition2);
@@ -970,6 +1001,7 @@ error:
 		IMPAPI(MIDI_SetItemExtents); // v5.0pre (no data on exact build in whatsnew, but I'm pretty sure I never saw this in v4)
 		IMPAPI(MIDI_SetNote);
 		IMPAPI(MIDI_SetTextSysexEvt);
+		IMPAPI(MIDI_Sort); IMPAPI(MIDI_DisableSort);
 		IMPAPI(MIDIEditor_GetActive);
 		IMPAPI(MIDIEditor_GetMode);
 		IMPAPI(MIDIEditor_GetSetting_int);
@@ -997,6 +1029,7 @@ error:
 		IMPAPI(PCM_Source_CreateFromSimple);
 		IMPAPI(PCM_Source_CreateFromType);
 		IMPAPI(PCM_Source_GetSectionInfo);
+		IMPAPI(PCM_Source_Destroy);
 		IMPAPI(PlayPreview);
 		IMPAPI(PlayPreviewEx);
 		IMPAPI(PlayTrackPreview);
@@ -1007,6 +1040,7 @@ error:
 		IMPAPI(projectconfig_var_addr);
 		IMPAPI(projectconfig_var_getoffs);
 		IMPAPI(realloc_cmd_ptr); // v5.965+
+		IMPAPI(ReaperGetPitchShiftAPI);
 		IMPAPI(RefreshToolbar);
 		IMPAPI(RefreshToolbar2); // v5pre8+
 #ifdef _WIN32
@@ -1033,6 +1067,7 @@ error:
 		IMPAPI(SetEnvelopePoint); // v5pre4+
 		IMPAPI(SetEnvelopePointEx) // v5.40pre3
 		IMPAPI(SetEnvelopeStateChunk);
+		IMPAPI(SetExtState);
 		IMPAPI(SetGlobalAutomationOverride);
 		IMPAPI(SetMasterTrackVisibility);
 		IMPAPI(SetMediaItemInfo_Value);

@@ -97,7 +97,7 @@ int GetCustomColors(COLORREF custColors[])
 void SetCustomColors(COLORREF custColors[])
 {
 	NSColorPanel* cp = [NSColorPanel sharedColorPanel];
-	id cswatch = [cp valueForKey:@"_colorSwatch"];
+	id cswatch = [cp valueForKey:@"_colorSwatch"]; // NSColorPanelFavoritesList
 
 	if ([cswatch respondsToSelector:@selector(readColors)])
 	{
@@ -112,20 +112,17 @@ void SetCustomColors(COLORREF custColors[])
 		}
 		[cswatch performSelector:@selector(writeColors)];
 	}
-  	else if ([cswatch respondsToSelector:@selector(savedColors)])
+	else if (id NSFavoriteColorsStore = NSClassFromString(@"NSFavoriteColorsStore"))
 	{
-		// high sierra -- this part doesn't seem to work yet, sadly
-		NSArray *colors = [cswatch performSelector:@selector(savedColors)];
-		NSMutableArray *newColors = colors ? [NSMutableArray arrayWithArray:colors] : [NSMutableArray arrayWithCapacity:16];
+		// High Sierra to at least Big Sur (undocumented API)
+		id cstore = [NSFavoriteColorsStore performSelector:@selector(defaultListCompatibleStore)];
+
 		for (int i = 0; i < 16; i++)
 		{
 			NSColor* col = [NSColor colorWithCalibratedRed:(custColors[i]>>16)/255.0 green:((custColors[i]&0xFF00)>>8)/255.0 blue:(custColors[i]&0xFF)/255.0 alpha:1.0];
-			if (i < [newColors count])
-				[newColors replaceObjectAtIndex:i withObject:col];
-			else
-				[newColors addObject:col];
+			id index = [cswatch performSelector:@selector(storeIndexForColorIndex:) withObject:reinterpret_cast<id>(i)];
+			[cstore performSelector:@selector(replaceColorAtIndex:withColor:) withObject:index withObject:col];
 		}
-		[cswatch performSelector:@selector(setSavedColors:) withObject:newColors];
 	}
 }
 
@@ -158,9 +155,12 @@ void HideColorChooser()
 }
 
 // Modified MakeCursorFromData from Cockos WDL (supports 32x32 unlike original function which supports 16x16)
-static NSCursor* SWS_MakeCursorFromData(unsigned char* data, int hotspot_x, int hotspot_y)
+HCURSOR SWS_Cursor::makeFromData()
 {
-  NSCursor *c=NULL;
+  if (inst)
+    return inst;
+
+  NSCursor *c = nullptr;
   NSBitmapImageRep* bmp = [[NSBitmapImageRep alloc]
     initWithBitmapDataPlanes:0
     pixelsWide:32
@@ -178,12 +178,10 @@ static NSCursor* SWS_MakeCursorFromData(unsigned char* data, int hotspot_x, int 
     unsigned char* p = [bmp bitmapData];
     if (p)
     {
-      int i;
-      for (i = 0; i < 32*32; ++i)
+      for (size_t i = 0; i < 32*32; ++i)
       {
-        // tried 4 bits per sample and memcpy, didn't work
-        p[2*i] = (data[i]&0xF0) | data[i]>>4;
-        p[2*i+1] = (data[i]<<4) | (data[i]&0xf);
+        p[2*i] = (data[i]&0xF0) | (data[i]>>4);
+        p[2*i+1] = (data[i]<<4) | (data[i]&0xF);
       }
 
       NSImage *img = [[NSImage alloc] init];
@@ -197,275 +195,8 @@ static NSCursor* SWS_MakeCursorFromData(unsigned char* data, int hotspot_x, int 
     }
     [bmp release];
   }
-  return c;
-}
 
-// Modified LoadCursor from Cockos WDL
-// Supports these cursors:
-// IDC_GRID_WARP
-// IDC_ENV_PEN_GRID, IDC_ENV_PT_ADJ_VERT
-// IDC_MISC_SPEAKER
-// IDC_ZOOM_DRAG, IDC_ZOOM_IN, IDC_ZOOM_OUT, IDC_ZOOM_UNDO
-// IDC_ERASER
-HCURSOR SWS_LoadCursor(int id)
-{
-  // bytemaps are (white<<4)|(alpha)
-  const unsigned char B = 0xF;
-  const unsigned char W = 0xFF;
-  //const unsigned char G = 0xF8;
-
-  static NSCursor* carr[9]; // set to NULL by compiler
-
-  NSCursor** pc=0;
-
-  int  index = 0;
-  bool found = false;
-
-
-  if (!found && id == IDC_ENV_PEN_GRID)    found = true; else if (!found) ++index;
-  if (!found && id == IDC_ENV_PT_ADJ_VERT) found = true; else if (!found) ++index;
-  if (!found && id == IDC_GRID_WARP)       found = true; else if (!found) ++index;
-  if (!found && id == IDC_MISC_SPEAKER)    found = true; else if (!found) ++index;
-  if (!found && id == IDC_ZOOM_DRAG)       found = true; else if (!found) ++index;
-  if (!found && id == IDC_ZOOM_IN)         found = true; else if (!found) ++index;
-  if (!found && id == IDC_ZOOM_OUT)        found = true; else if (!found) ++index;
-  if (!found && id == IDC_ZOOM_UNDO)       found = true; else if (!found) ++index;
-  if (!found && id == IDC_ERASER)          found = true; else if (!found) ++index;
-
-  if (!found)
-    return NULL;
-  pc = &carr[index];
-
-  if (!(*pc))
-  {
-    if (id == IDC_ENV_PEN_GRID)
-    {
-      static unsigned char p[32*32] =
-      {
-        0,0,0,0,0,0,0,0,0,0,0,0,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,0,0,0,B,W,B,0,0,0,B,0,0,B,0,0,B,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,0,0,B,W,W,B,B,0,0,B,0,0,B,0,0,B,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,0,B,W,W,B,B,0,0,0,B,0,0,B,0,0,B,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,B,W,W,B,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,B,W,W,B,B,0,0,0,0,0,B,0,0,B,0,0,B,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,B,W,W,B,B,0,0,0,0,0,0,B,0,0,B,0,0,B,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,B,W,W,B,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,B,W,W,B,B,0,0,0,0,0,0,0,0,B,0,0,B,0,0,B,0,0,0,0,0,0,0,0,
-        0,0,0,B,W,W,B,B,0,0,0,0,0,0,0,0,0,B,0,0,B,0,0,B,0,0,0,0,0,0,0,0,
-        0,0,B,B,W,B,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,B,B,B,B,0,0,0,0,0,0,0,0,0,0,0,B,0,0,B,0,0,B,0,0,0,0,0,0,0,0,
-        0,B,B,B,B,0,0,0,0,0,B,B,0,0,0,0,0,B,0,0,B,0,0,B,0,0,0,0,0,0,0,0,
-        0,B,B,0,0,0,0,0,B,B,0,0,B,B,0,0,0,B,0,0,B,0,0,B,0,0,0,0,0,0,0,0,
-        B,0,0,B,B,0,0,B,0,0,0,0,0,0,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,B,B,0,0,0,0,0,0,0,0,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-      };
-        *pc = SWS_MakeCursorFromData(p, 2, 14);
-    }
-    else if (id == IDC_ENV_PT_ADJ_VERT)
-    {
-      static unsigned char p[32*32] =
-      {
-        0,0,0,0,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,B,W,W,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,B,W,W,W,W,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        B,W,W,W,W,W,W,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        B,B,B,B,W,B,B,B,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,B,0,B,0,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,B,W,B,W,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,B,W,W,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,B,W,W,W,W,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,B,W,W,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,B,W,B,W,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,B,0,B,0,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        B,B,B,B,W,B,B,B,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        B,W,W,W,W,W,W,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,B,W,W,W,W,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,B,W,W,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-      };
-        *pc = SWS_MakeCursorFromData(p, 4, 12);
-    }
-    else if (id == IDC_GRID_WARP)
-    {
-      static unsigned char p[32*32] =
-      {
-        0,0,0,0,0,0,0,0,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,B,B,0,0,0,B,0,0,0,B,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,B,W,B,0,0,0,B,0,0,0,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,B,W,W,B,B,B,B,B,B,B,B,B,W,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        B,W,W,W,W,W,W,W,W,W,W,W,W,W,W,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        B,W,W,W,W,W,W,W,W,W,W,W,W,W,W,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,B,W,W,B,B,B,B,B,B,B,B,B,W,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,B,W,B,0,0,0,B,0,0,0,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,B,B,0,0,0,B,0,0,0,B,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-      };
-        *pc = SWS_MakeCursorFromData(p, 8, 10);
-    }
-    else if (id == IDC_MISC_SPEAKER)
-    {
-      static unsigned char p[32*32] =
-      {
-        0,0,0,0,0,0,0,B,B,B,0,0,0,0,0,0,0,0,W,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,B,B,W,B,0,0,0,0,0,0,0,W,B,W,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,B,B,W,W,B,0,0,0,0,0,W,0,0,W,B,W,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,B,B,W,W,W,B,0,0,0,0,W,B,W,0,0,W,B,W,0,0,0,0,0,0,0,0,0,0,
-        B,B,B,B,B,W,W,W,W,B,0,0,W,0,0,W,B,W,0,W,B,W,0,0,0,0,0,0,0,0,0,0,
-        B,B,W,B,W,W,W,W,W,B,0,W,B,W,0,W,B,W,0,0,W,B,W,0,0,0,0,0,0,0,0,0,
-        B,B,W,B,W,W,W,W,W,B,0,0,W,B,W,0,W,B,W,0,W,B,W,0,0,0,0,0,0,0,0,0,
-        B,B,W,B,W,W,W,W,W,B,0,0,W,B,W,0,W,B,W,0,W,B,W,0,0,0,0,0,0,0,0,0,
-        B,B,W,B,W,W,W,W,W,B,0,0,W,B,W,0,W,B,W,0,W,B,W,0,0,0,0,0,0,0,0,0,
-        B,B,W,B,W,W,W,W,W,B,0,W,B,W,0,W,B,W,0,0,W,B,W,0,0,0,0,0,0,0,0,0,
-        B,B,B,B,B,W,W,W,W,B,0,0,W,0,0,W,B,W,0,W,B,W,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,B,B,W,W,W,B,0,0,0,0,W,B,W,0,0,W,B,W,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,B,B,W,W,B,0,0,0,0,0,W,0,0,W,B,W,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,B,B,W,B,0,0,0,0,0,0,0,W,B,W,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,B,B,B,0,0,0,0,0,0,0,0,W,0,0,0,0,0,0,0,0,0,0,0,0,0,
-      };
-        *pc = SWS_MakeCursorFromData(p, 10, 7);
-    }
-    else if (id == IDC_ZOOM_DRAG)
-    {
-      static unsigned char p[32*32] =
-      {
-        0,0,0,0,B,B,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,B,B,W,W,W,B,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,B,W,W,B,B,B,W,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,B,W,B,B,W,B,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        B,W,B,B,W,W,W,B,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        B,W,B,B,B,B,B,B,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        B,W,B,B,W,W,W,B,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,B,W,B,B,W,B,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,B,W,W,B,B,B,W,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,B,B,W,W,W,B,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,B,B,B,0,0,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,0,0,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,0,0,0,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,0,0,0,0,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,0,0,0,0,0,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,0,0,0,0,0,0,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-      };
-      *pc = SWS_MakeCursorFromData(p, 5, 5);
-    }
-    else if (id == IDC_ZOOM_IN)
-    {
-      static unsigned char p[32*32] =
-      {
-        0,0,0,0,B,B,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,B,B,W,W,W,B,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,B,W,W,B,B,B,W,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,B,W,B,0,0,0,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        B,W,B,B,B,B,B,B,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        B,W,B,W,W,W,W,W,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        B,W,B,B,B,B,B,B,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,B,W,B,0,0,0,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,B,W,W,B,B,B,W,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,B,B,W,W,W,B,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,B,B,B,0,0,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,0,0,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,0,0,0,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,0,0,0,0,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,0,0,0,0,0,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,0,0,0,0,0,0,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-      };
-      *pc = SWS_MakeCursorFromData(p, 5, 5);
-    }
-    else if (id == IDC_ZOOM_OUT)
-    {
-      static unsigned char p[32*32] =
-      {
-        0,0,0,0,B,B,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,B,B,W,W,W,B,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,B,W,W,B,B,B,W,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,B,W,B,W,W,W,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        B,W,B,B,B,B,B,B,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        B,W,B,W,W,W,W,W,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        B,W,B,B,B,B,B,B,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,B,W,B,W,W,W,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,B,W,W,B,B,B,W,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,B,B,W,W,W,B,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,B,B,B,0,0,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,0,0,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,0,0,0,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,0,0,0,0,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,0,0,0,0,0,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,0,0,0,0,0,0,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-      };
-     *pc = SWS_MakeCursorFromData(p, 5, 5);
-    }
-    else if (id == IDC_ZOOM_UNDO)
-    {
-      static unsigned char p[32*32] =
-      {
-        0,0,0,0,B,B,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,B,B,W,W,W,B,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,B,W,W,B,B,B,W,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,B,W,B,0,0,0,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        B,W,B,W,B,0,B,W,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        B,W,B,W,B,0,B,W,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        B,W,B,W,B,B,B,W,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,B,W,B,W,W,W,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,B,W,W,B,B,B,W,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,B,B,W,W,W,B,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,B,B,B,0,0,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,0,0,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,0,0,0,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,0,0,0,0,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,0,0,0,0,0,B,W,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,0,0,0,0,0,0,B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-      };
-      *pc = SWS_MakeCursorFromData(p, 5, 5);
-    }
-    else if (id == IDC_ERASER)
-    {
-      static unsigned char p[32*32] =
-      {
-        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,B,B,B,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,B,W,W,W,B,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,B,W,W,W,W,W,B,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,0,0,0,0,0,0,B,W,W,W,W,W,W,W,B,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,0,0,0,0,0,0,B,W,W,W,W,W,W,W,W,B,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,0,0,0,0,0,0,B,W,W,W,W,W,W,W,W,W,B,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,0,0,0,0,0,0,B,W,W,W,W,W,W,W,W,W,W,B,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,0,0,0,0,0,0,B,W,W,W,W,W,W,W,W,W,B,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,0,0,0,0,0,0,B,W,W,W,W,W,W,W,W,B,0,0,B,B,0,0,0,0,
-        0,0,0,0,0,0,0,0,0,0,0,0,0,0,B,W,W,W,W,W,W,W,B,0,0,B,B,B,B,0,0,0,
-        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,B,W,W,W,W,W,B,0,0,B,B,B,B,B,B,0,0,
-        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,B,W,W,W,B,0,0,B,B,B,B,B,B,B,B,0,
-        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,B,W,B,0,0,B,B,B,B,B,B,B,B,B,0,
-        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,B,0,0,B,B,B,B,B,B,B,B,B,B,0,
-        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,B,B,B,B,B,B,B,B,B,B,B,0,
-        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,B,B,B,B,B,B,B,B,B,B,B,0,
-        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,B,B,B,B,B,B,B,B,B,0,0,
-        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,B,B,B,B,B,B,B,0,0,0,
-        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,B,B,B,B,B,0,0,0,0,
-        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,B,B,B,0,0,0,0,0,
-      };
-      *pc = SWS_MakeCursorFromData(p, 15, 2);
-    }
-
-  }
-  return (HCURSOR)*pc;
+  return inst = reinterpret_cast<HCURSOR>(c);
 }
 
 void mouse_event(DWORD dwFlags, DWORD dx, DWORD dy, DWORD dwData, ULONG_PTR dwExtraInfo)
@@ -505,4 +236,59 @@ void SetMenuItemSwatch(HMENU hMenu, UINT pos, int iSize, COLORREF color)
   [nscolor set];
   NSRectFill(NSMakeRect(0, 0, size.width, size.height));
   [item.image unlockFocus];
+}
+
+static bool g_miscTimerRunning;
+void TestMiscTimerRunning()
+{
+  g_miscTimerRunning = true;
+  plugin_register("-timer", reinterpret_cast<void *>(&TestMiscTimerRunning));
+}
+
+void WaitUntil(bool(*predicate)(void *), void *data)
+{
+  g_miscTimerRunning = false;
+  plugin_register("timer", reinterpret_cast<void *>(&TestMiscTimerRunning));
+
+  bool firstRun = true;
+  while (!predicate(data)) {
+    // Waiting 30 ms instead of 1 ms (like on Windows) to match the normal
+    // frequency of REAPER's misc timer
+    constexpr int DEFER_TIMER_SPEED = 30,
+                  MISC_TIMER        = 0x29A;
+
+    [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:DEFER_TIMER_SPEED / 1000.f]];
+
+    // REAPER's misc timer (based on NSTimer), responsible for many many things
+    // from UI updates to updating GetPlayPosition(), won't be re-entered in the
+    // event loop iterations above while if we're blocking it's handler.
+    //
+    // Wait until we're 100% sure the misc timer is suspended
+    // (by waiting twice its normal fire rate) before manually triggering it.
+    if (firstRun)
+      firstRun = false;
+    else if (!g_miscTimerRunning) {
+      plugin_register("-timer", reinterpret_cast<void *>(&TestMiscTimerRunning));
+      PostMessage(GetMainHwnd(), WM_TIMER, MISC_TIMER, 0);
+    }
+  }
+}
+
+void SWS_Mac_MakeDefaultWindowMenu(HWND hwnd)
+{
+  // Replace the menubar with an empty one with just an "Edit" menu
+  // when the given window has focus.
+  if (HMENU menu = SWELL_GetDefaultModalWindowMenu()) {
+    if ((menu = SWELL_DuplicateMenu(menu))) {
+      SetMenu(hwnd, menu);
+      menu = GetSubMenu(menu, 0); // "REAPER" menu
+      SWELL_SetMenuDestination(menu, GetMainHwnd());
+    }
+  }
+}
+
+void Mac_TextViewSetAllowsUndo(HWND hwnd, const bool enable)
+{
+  if(hwnd && [(id)hwnd isKindOfClass:[NSTextView class]])
+    [(NSTextView *)hwnd setAllowsUndo:enable];
 }

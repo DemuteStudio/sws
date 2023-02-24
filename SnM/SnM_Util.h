@@ -42,6 +42,7 @@ bool FileOrDirExists(const char* _fn);
 bool FileOrDirExistsErrMsg(const char* _fn, bool _errMsg = true);
 bool SNM_DeleteFile(const char* _filename, bool _recycleBin);
 bool SNM_DeletePeakFile(const char* _fn, bool _recycleBin);
+bool SNM_MovePeakFile(const char* oldMediaFn, const char* newMediaFn);
 bool SNM_CopyFile(const char* _destFn, const char* _srcFn);
 void RevealFile(const char* _fn, bool _errMsg = true);
 bool BrowseResourcePath(const char* _title, const char* _dir, const char* _fileFilters, char* _fn, int _fnSize, bool _wantFullPath = false);
@@ -60,13 +61,14 @@ void ScanFiles(WDL_PtrList<WDL_String>* _files, const char* _initDir, const char
 void StringToExtensionConfig(WDL_FastString* _str, ProjectStateContext* _ctx);
 void ExtensionConfigToString(WDL_FastString* _str, ProjectStateContext* _ctx);
 
-void SaveIniSection(const char* _iniSectionName, WDL_FastString* _iniSection, const char* _iniFn);
+bool SaveIniSection(const char* _iniSectionName, const std::string& _iniSection, const char* _iniFn);
 void UpdatePrivateProfileSection(const char* _oldAppName, const char* _newAppName, const char* _iniFn, const char* _newIniFn = NULL);
 void UpdatePrivateProfileString(const char* _appName, const char* _oldKey, const char* _newKey, const char* _iniFn, const char* _newIniFn = NULL);
 void SNM_UpgradeIniFiles(int _iniVersion);
 
 int snprintfStrict(char* _buf, size_t _n, const char* _fmt, ...);
 bool GetStringWithRN(const char* _bufSrc, char* _buf, int _bufSize);
+std::string GetStringWithRN(const std::string &);
 const char* FindFirstRN(const char* _str, bool _anyOrder = false);
 char* ShortenStringToFirstRN(char* _str, bool _anyOrder = false);
 bool ReplaceWithChar(char* _strInOut, const char* _str, const char _replaceCh);

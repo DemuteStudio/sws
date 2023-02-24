@@ -135,7 +135,8 @@ bool g_internalMkrRgnChange = false;
 // (use the S&M one instead - already registered via SNM_WindowManager::Init())
 NotesWnd::NotesWnd()
 	: SWS_DockWnd(IDD_SNM_NOTES, __LOCALIZE("Notes","sws_DLG_152"), ""),
-	m_edit{nullptr} // NotesWnd may be constructed without being open
+	m_edit { nullptr }, // NotesWnd may be constructed without being open
+	m_settingText { false }
 {
 	m_id.Set(NOTES_WND_ID);
 	// must call SWS_DockWnd::Init() to restore parameters and open the window if necessary
@@ -147,11 +148,22 @@ NotesWnd::~NotesWnd() = default;
 void NotesWnd::OnInitDlg()
 {
 	m_edit = GetDlgItem(m_hwnd, IDC_EDIT1);
+	HWND edit2 = GetDlgItem(m_hwnd, IDC_EDIT2);
 
 	// don't passthrough input to the main window
 	// https://forum.cockos.com/showthread.php?p=1208961
 	SetWindowLongPtr(m_edit, GWLP_USERDATA, 0xdeadf00b);
-	SetWindowLongPtr(GetDlgItem(m_hwnd, IDC_EDIT2), GWLP_USERDATA, 0xdeadf00b);
+	SetWindowLongPtr(edit2,  GWLP_USERDATA, 0xdeadf00b);
+
+#ifdef __APPLE__
+	// Prevent shortcuts in the menubar from triggering main window actions
+	// bypassing the accelerator hook return value
+	SWS_Mac_MakeDefaultWindowMenu(m_hwnd);
+
+	// WS_VSCROLL makes SWELL use an NSTextView instead of NSTextField
+	Mac_TextViewSetAllowsUndo(m_edit, true);
+	Mac_TextViewSetAllowsUndo(edit2,  true);
+#endif
 
 	m_resize.init_item(IDC_EDIT1, 0.0, 0.0, 1.0, 1.0);
 	m_resize.init_item(IDC_EDIT2, 0.0, 0.0, 1.0, 1.0);
@@ -245,7 +257,9 @@ void NotesWnd::SetText(const char* _str, bool _addRN) {
 	if (_str) {
 		if (_addRN) GetStringWithRN(_str, g_lastText, sizeof(g_lastText));
 		else lstrcpyn(g_lastText, _str, sizeof(g_lastText));
+		m_settingText = true;
 		SetWindowText(m_edit, g_lastText);
+		m_settingText = false;
 	}
 }
 
@@ -287,6 +301,23 @@ void NotesWnd::RefreshGUI()
 	m_parentVwnd.RequestRedraw(NULL); // the meat!
 }
 
+void NotesWnd::SetFontsizeFrominiFile()
+{
+	int notesFontsize = GetPrivateProfileInt(NOTES_INI_SEC, "Fontsize", -666, g_SNM_IniFn.Get());
+	if (notesFontsize != -666)
+	{
+		// first try to get current font, if this doesn't work use theme font as fallback
+		HFONT hfont = (HFONT)SendMessage(m_edit, WM_GETFONT, 0, 0);
+		if (!hfont)
+			hfont = SNM_GetThemeFont()->GetHFont();
+
+		LOGFONT lf;
+		GetObject(hfont, sizeof(lf), &lf);
+		lf.lfHeight = notesFontsize;
+		SendMessage(m_edit, WM_SETFONT, (WPARAM)CreateFontIndirect(&lf), TRUE);
+	}
+}
+
 void NotesWnd::SetWrapText(const bool wrap)
 {
 	g_wrapText = wrap;
@@ -294,7 +325,10 @@ void NotesWnd::SetWrapText(const bool wrap)
 	char buf[sizeof(g_lastText)]{};
 	GetWindowText(m_edit, buf, sizeof(buf));
 	m_edit = GetDlgItem(m_hwnd, wrap ? IDC_EDIT2 : IDC_EDIT1);
+	SetFontsizeFrominiFile();
+	m_settingText = true;
 	SetWindowText(m_edit, buf);
+	m_settingText = false;
 
 #ifdef _WIN32
 	// avoid flickering on Windows
@@ -314,7 +348,7 @@ void NotesWnd::OnCommand(WPARAM wParam, LPARAM lParam)
 	{
 		case IDC_EDIT1:
 		case IDC_EDIT2:
-			if (HIWORD(wParam)==EN_CHANGE)
+			if (HIWORD(wParam)==EN_CHANGE && !m_settingText)
 				SaveCurrentText(g_notesType, MarkProjectDirty==NULL); // MarkProjectDirty() avail. since v4.55pre2
 			break;
 #ifdef WANT_ACTION_HELP
@@ -404,39 +438,27 @@ void OSXForceTxtChangeJob::Perform() {
 //  1 = eat
 int NotesWnd::OnKey(MSG* _msg, int _iKeyState)
 {
-/*JFB not needed: IDC_EDIT is the single control of this window..
-#ifdef _WIN32
-	if (_msg->hwnd == m_edit)
-#else
-	if (GetFocus() == m_edit)
-#endif
-*/
+	if (g_locked)
 	{
-		if (g_locked)
-		{
-			_msg->hwnd = m_hwnd; // redirect to main window
-			return 0;
-		}
-		else if (_msg->message == WM_KEYDOWN || _msg->message == WM_CHAR)
-		{
-			// ctrl+A => select all
-			if (_msg->wParam == 'A' && _iKeyState == LVKF_CONTROL)
-			{
-				SetFocus(m_edit);
-				SendMessage(m_edit, EM_SETSEL, 0, -1);
-				return 1;
-			}
-			else
-#ifndef _SNM_SWELL_ISSUES
-			if (_msg->wParam == VK_RETURN)
-				return -1; // send the return key to the edit control
-#else
-			// fix/workaround (SWELL bug?): EN_CHANGE is not always sent...
-			{
-				ScheduledJob::Schedule(new OSXForceTxtChangeJob());
-				return -1; // send the return key to the edit control
-			}
+		_msg->hwnd = m_hwnd; // redirect to main window
+		return 0;
+	}
+	else if(_msg->hwnd == m_edit)
+	{
+#ifdef _SNM_SWELL_ISSUES
+		// fix/workaround (SWELL bug?): EN_CHANGE is not always sent...
+		ScheduledJob::Schedule(new OSXForceTxtChangeJob());
 #endif
+		return -1;
+	}
+	else if (_msg->message == WM_KEYDOWN || _msg->message == WM_CHAR)
+	{
+		// ctrl+A => select all
+		if (_msg->wParam == 'A' && _iKeyState == LVKF_CONTROL)
+		{
+			SetFocus(m_edit);
+			SendMessage(m_edit, EM_SETSEL, 0, -1);
+			return 1;
 		}
 	}
 	return 0; 

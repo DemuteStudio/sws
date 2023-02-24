@@ -28,18 +28,23 @@
 #include "stdafx.h"
 #include "cfillion.hpp"
 
+#include "apiparam.hpp"
+#include "Breeder/BR_Util.h"
+#include "Color/Color.h"
+#include "preview.hpp"
 #include "SnM/SnM_FX.h"
 #include "SnM/SnM_Window.h"
 #include "version.h"
 
 #include <WDL/localize/localize.h>
+#include <WDL/projectcontext.h>
 
 #ifdef _WIN32
   constexpr unsigned int CLIPBOARD_FORMAT { CF_UNICODETEXT };
 #else
-// using RegisterClipboardFormat instead of CF_TEXT for compatibility with REAPER v5
-// (prior to WDL commit 0f77b72adf1cdbe98fd56feb41eb097a8fac5681)
-#  define CLIPBOARD_FORMAT RegisterClipboardFormat("SWELL__CF_TEXT")
+// requires redefinition of CF_TEXT in sws_rpf_wrapper.h to be a runtime call to
+// RegisterClipboardFormat for compatibility with REAPERS v5
+#  define CLIPBOARD_FORMAT CF_TEXT
 #endif
 
 extern WDL_PtrList_DOD<WDL_FastString> g_script_strs;
@@ -176,6 +181,20 @@ void CF_GetSWSVersion(char *buf, const int bufSize)
   snprintf(buf, bufSize, "%d.%d.%d.%d", SWS_VERSION);
 }
 
+int CF_GetCustomColor(const int index)
+{
+  UpdateCustomColors();
+  return index >= 0 && index < 16 ? g_custColors[index] : 0;
+}
+
+void CF_SetCustomColor(const int index, const int color)
+{
+  if(index >= 0 && index < 16) {
+    g_custColors[index] = color;
+    PersistColors();
+  }
+}
+
 int CF_EnumerateActions(const int section, const int idx, char *nameBuf, const int nameBufSize)
 {
   const char *name {};
@@ -203,20 +222,30 @@ static void CF_RefreshTrackFXChainTitle(MediaTrack *track)
 
 HWND CF_GetTrackFXChain(MediaTrack *track)
 {
+  return CF_GetTrackFXChainEx(nullptr, track, false);
+}
+
+HWND CF_GetTrackFXChainEx(ReaProject *, MediaTrack *track, const bool input)
+{
+  // REAPER already validates whether the track belongs to the given project
   if(!track)
     return nullptr;
 
   char chainTitle[128];
 
-  if(track == GetMasterTrack(nullptr)) {
-    snprintf(chainTitle, sizeof(chainTitle), "%s%s",
-      __LOCALIZE("FX: ", "fx"), __LOCALIZE("Master Track", "fx"));
+  const int trackNumber
+    { static_cast<int>(GetMediaTrackInfo_Value(track, "IP_TRACKNUMBER")) };
+  const bool bypassed { !GetMediaTrackInfo_Value(track, "I_FXEN") };
+
+  if(trackNumber == -1) {
+    snprintf(chainTitle, sizeof(chainTitle), "%s%s%s", __LOCALIZE("FX: ", "fx"),
+      input    ? __LOCALIZE("Monitoring",   "fx")
+               : __LOCALIZE("Master Track", "fx"),
+      bypassed ? __LOCALIZE(" [BYPASSED]",  "fx") : "");
 
     return FindWindowEx(nullptr, nullptr, nullptr, chainTitle);
   }
 
-  const int trackNumber
-    { static_cast<int>(GetMediaTrackInfo_Value(track, "IP_TRACKNUMBER")) };
   const std::string trackName
     { static_cast<char *>(GetSetMediaTrackInfo(track, "P_NAME", nullptr)) };
   const bool isFolder { GetMediaTrackInfo_Value(track, "I_FOLDERDEPTH") > 0 };
@@ -228,9 +257,11 @@ HWND CF_GetTrackFXChain(MediaTrack *track)
   GetSetMediaTrackInfo_String(track, "P_NAME", guid, true);
   CF_RefreshTrackFXChainTitle(track);
 
-  snprintf(chainTitle, sizeof(chainTitle), R"(%s%s %d "%s"%s)",
+  snprintf(chainTitle, sizeof(chainTitle), R"(%s%s %d "%s"%s%s%s)",
     __LOCALIZE("FX: ", "fx"), __LOCALIZE("Track", "fx"), trackNumber, guid,
-    isFolder ? __LOCALIZE(" (folder)", "fx") : "");
+    isFolder ? __LOCALIZE(" (folder)",         "fx") : "",
+    input    ? __LOCALIZE(" (input FX chain)", "fx") : "",
+    bypassed ? __LOCALIZE(" [BYPASSED]",       "fx") : "");
 
   HWND match { GetReaHwndByTitle(chainTitle) };
 
@@ -314,6 +345,26 @@ int CF_GetMediaSourceBitDepth(PCM_source *source)
   return source ? source->GetBitsPerSample() : 0;
 }
 
+double CF_GetMediaSourceBitRate(PCM_source *source)
+{
+  if(!source)
+    return 0;
+
+  double brate{};
+  if(source->Extended(PCM_SOURCE_EXT_GETBITRATE, &brate, nullptr, nullptr))
+    return brate;
+
+  if(strcmp(source->GetType(), "WAVE"))
+    return 0;
+
+  // constant bit rate
+  const double chans  = source->GetNumChannels(),
+               bdepth = source->GetBitsPerSample(),
+               srate  = source->GetSampleRate();
+
+  return srate * bdepth * chans;
+}
+
 bool CF_GetMediaSourceOnline(PCM_source *source)
 {
   return source && source->IsAvailable();
@@ -349,7 +400,7 @@ bool CF_GetMediaSourceRPP(PCM_source *source, char *buf, const int bufSize)
 }
 
 int CF_EnumMediaSourceCues(PCM_source *source, const int index, double *time,
-  double *endTime, bool *isRegion, char *name, const int nameSize)
+  double *endTime, bool *isRegion, char *name, const int nameSize, bool *isChapter)
 {
   if(!source)
     return 0;
@@ -368,6 +419,9 @@ int CF_EnumMediaSourceCues(PCM_source *source, const int index, double *time,
   if(name && cue.m_name)
     snprintf(name, nameSize, "%s", cue.m_name);
 
+  if (isChapter)
+      *isChapter = cue.m_flags & 4;
+ 
   return add ? index + add : 0;
 }
 
@@ -378,4 +432,148 @@ bool CF_ExportMediaSource(PCM_source *source, const char *file)
 
   return source->Extended(PCM_SOURCE_EXT_EXPORTTOFILE,
     const_cast<char *>(file), nullptr, nullptr) > 0;
+}
+
+// cannot return CreateFromType("SECTION"): if not added to the project,
+// the ReaScript argument validator won't recognize the new section as valid
+bool CF_PCM_Source_SetSectionInfo(PCM_source *section, PCM_source *source,
+  const double offset, double length, const bool reverse)
+{
+  if(!section || section == source || strcmp(section->GetType(), "SECTION"))
+    return false;
+
+  enum Flags { IgnoreRange = 1, Reverse = 2 };
+  int mode {};
+  if(!offset && !length)
+    mode |= IgnoreRange;
+  if(reverse)
+    mode |= Reverse;
+
+  if(!source)
+    source = section->GetSource();
+  if(!source)
+    return false;
+  if(length <= 0.0)
+    length = source->GetLength() - offset + length;
+
+  WDL_HeapBuf buffer;
+  ProjectStateContext *ctx { ProjectCreateMemCtx(&buffer) };
+  ctx->AddLine("LENGTH %f", length);
+  ctx->AddLine("STARTPOS %f", offset);
+  ctx->AddLine("MODE %d", mode);
+  ctx->AddLine("<SOURCE %s", source->GetType());
+  source->SaveState(ctx);
+  ctx->AddLine(">");
+  // the section deletes its current parent source itself
+  section->LoadState("<SOURCE SECTION", ctx);
+  delete ctx;
+
+  return true;
+}
+
+BOOL CF_GetScrollInfo(HWND hwnd, const int bar, LPSCROLLINFO si)
+{
+  if(bar == SB_VERT && hwnd == GetArrangeWnd() && (si->fMask & SIF_POS)) {
+    // CoolSB_GetScrollInfo's nPos is unreliable after zooming in on tracks
+    for(int i {}; i <= GetNumTracks(); ++i) {
+      MediaTrack *track { CSurf_TrackFromID(i, false) };
+      if(TcpVis(track)) {
+        si->nPos = -static_cast<int>(GetMediaTrackInfo_Value(track, "I_TCPY"));
+        si->fMask &= ~SIF_POS;
+        break;
+      }
+    }
+  }
+
+  return CoolSB_GetScrollInfo(hwnd, bar, si);
+}
+
+static const APIParam<CF_Preview> PREVIEW_PARAMS[] {
+  { "B_LOOP",         &CF_Preview::getLoop,          &CF_Preview::setLoop          },
+  { "B_PPITCH",       &CF_Preview::getPreservePitch, &CF_Preview::setPreservePitch },
+  { "D_FADEINLEN",    &CF_Preview::getFadeInLen,     &CF_Preview::setFadeInLen     },
+  { "D_FADEOUTLEN",   &CF_Preview::getFadeOutLen,    &CF_Preview::setFadeOutLen    },
+  { "D_LENGTH",       &CF_Preview::getLength,        nullptr                       },
+  { "D_MEASUREALIGN", &CF_Preview::getMeasureAlign,  &CF_Preview::setMeasureAlign  },
+  { "D_PAN",          &CF_Preview::getPan,           &CF_Preview::setPan           },
+  { "D_PITCH",        &CF_Preview::getPitch,         &CF_Preview::setPitch         },
+  { "D_PLAYRATE",     &CF_Preview::getPlayRate,      &CF_Preview::setPlayRate      },
+  { "D_POSITION",     &CF_Preview::getPosition,      &CF_Preview::setPosition      },
+  { "D_VOLUME",       &CF_Preview::getVolume,        &CF_Preview::setVolume        },
+  { "I_OUTCHAN",      &CF_Preview::getOutputChannel, &CF_Preview::setOutput        },
+  { "I_PITCHMODE",    &CF_Preview::getPitchMode,     &CF_Preview::setPitchMode     },
+};
+
+CF_Preview *CF_CreatePreview(PCM_source *source)
+{
+  if(!source || source->GetSampleRate() < 1.0) // only accept sources with audio
+    return nullptr;
+
+  return new CF_Preview { source };
+}
+
+bool CF_Preview_GetValue(CF_Preview *preview, const char *name, double *valueOut)
+{
+  if(!name || !valueOut || !CF_Preview::isValid(preview))
+    return false;
+
+  for(const auto &param : PREVIEW_PARAMS) {
+    if(param.match(name))
+      return param.get(preview, valueOut);
+  }
+
+  return false;
+}
+
+bool CF_Preview_GetPeak(CF_Preview *preview, const int channel, double *peakvolOut)
+{
+  if(!peakvolOut || !CF_Preview::isValid(preview))
+    return false;
+
+  return preview->getPeak(channel, peakvolOut);
+}
+
+bool CF_Preview_SetValue(CF_Preview *preview, const char *name, double newValue)
+{
+  if(!name || !CF_Preview::isValid(preview))
+    return false;
+
+  for(const auto &param : PREVIEW_PARAMS) {
+    if(param.match(name))
+      return param.set(preview, newValue);
+  }
+
+  return false;
+}
+
+// the ReaProject argument is there only to satisfy REAPER's argument validator
+bool CF_Preview_SetOutputTrack(CF_Preview *preview, ReaProject *, MediaTrack *track)
+{
+  if(!track || !CF_Preview::isValid(preview))
+    return false;
+
+  preview->setOutput(track);
+  return true;
+}
+
+bool CF_Preview_Play(CF_Preview *preview)
+{
+  if(!CF_Preview::isValid(preview))
+    return false;
+
+  return preview->play();
+}
+
+bool CF_Preview_Stop(CF_Preview *preview)
+{
+  if(!CF_Preview::isValid(preview))
+    return false;
+
+  preview->stop();
+  return true;
+}
+
+void CF_Preview_StopAll()
+{
+  CF_Preview::stopAll();
 }

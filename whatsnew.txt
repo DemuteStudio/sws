@@ -1,3 +1,141 @@
+!v2.13.2 pre-release build (January 16, 2023)
+
+Actions:
++Fix "SWS/BR: {Toggle,Show,Hide} * send envelopes" deleting automation items if there are no points present in the underlying envelope (issue 1654)
++Fix "SWS: Time-select {previous,next} region" setting loop points instead of time selection (issue 1648)
++Fix a crash when running "SWS/AW: Fade in/out/crossfade selected area of selected items" if a selected item contains empty takes (issue 1638, thread https://forum.cockos.com/showthread.php?t=267010|267010|]
++Make "SWS/BR: Delete take under mouse cursor" delete the item if it only contains one take (issue 1674)
++Preserve existing clipboard contents if there are no sends/receive to copy in "{Copy,Cut} selected tracks {sends,receives,routings}" (issue 1681)
++Remove the empty line at the begining of the file written by the "Dump action list" actions (issue 1666)
++Take playrate and stretch markers into account in "SWS/AW: Fill gaps between selected items (quick, no crossfade)", "(advanced)" and "(advanced, use last settings)" (issue 1657)
++Use default track settings in "Create and select first track" and "Insert track above selected tracks" (issue 1669)
+
+Cycle Actions:
++Implement "Wait n seconds before next action" (issue 1656)
+
+macOS:
++Implement "Wait for next {bar,beat}" and "Wait until end of loop" actions (experimental) (issue 971, issue 1676)
+
+MIDI Editor:
++Add support for CC shapes in the following actions:
+ - SWS/BR: Copy selected CC events in active item to lane under mouse cursor
+ - SWS/BR: Copy selected CC events in active item to last clicked lane
+ - SWS/BR: Restore events to all visible CC lanes, slot n
+ - SWS/BR: Restore events to CC lane under mouse cursor, slot n
+ - SWS/BR: Save selected events in CC lane under mouse cursor, slot n
+ - SWS/BR: Save selected events in last clicked CC lane, slot n
+
+Misc:
++Fix left post-fx dual pan envelopes being detected as pre-fx (issue 1641)
++Limit toolbars auto refresh to when a watched action's toggle state changes (post https://forum.cockos.com/showthread.php?p=2629385|2629385|)
++Support REAPER 6.73+devXXXX floating-point vertical zooming (issue 1717)
++Update TagLib to version 1.13
+
+Notes:
++Enable text editing shortcuts in the text field on macOS and Windows (issue 1721)
+
+ReaScript API:
++Add CF_PCM_Source_SetSectionInfo
++Add media source preview API (issue 1702)
++Add NF_Base64_Decode and NF_Base64_Encode (issue 778)
++Add NF_ScrollHorizontallyByPercentage
++Add support for bypassed chains in CF_GetTrackFXChain (issue 1634)
++Deprecate CF_EnumerateActions and CF_GetCommandText (use kbd_enumerateActions and kbd_getTextFromCmd instead, post https://forum.cockos.com/showthread.php?p=2610217|2610217|)
++Redirect vzoom2 to vzoom3 in SNM_{Get,Set}IntConfigVar and make SNM_SetDoubleConfigVar("vzoom3") write to both
+
+Region Playlist:
++Copy tempo/time signature markers (issue 1462)
+
+Snapshots:
++Apply filter when recalling snapshots via actions (issue 1631)
+
+!v2.13.1 pre-release build (May 7, 2022)
+
+Actions:
++Fix copying text containing no UTF-8 sequences in some actions on Windows (issue 1625, v2.13.0 regression)
++Improve iteration when unregistering SWS actions (post https://forum.cockos.com/showthread.php?p=2509285|2509285|)
++Support 32-bit action IDs (post https://forum.cockos.com/showthread.php?p=2509285|2509285|)
++Xenakios Rename take(s) (and source files): delete old .reapindex file (REAPER v6.46+)
+
+Cycle actions:
++Fix adding actions from action list on Windows (thanks Justin!) (issue 1609)
++Fix crashes when exporting (selection/current section) non-Main section cycle actions
++Show warning about cycle actions containing custom actions can't be shared with other users when exporting cycle actions (rather than when registering cycle actions) (issue 1620, partly)
+
+ReaScript API:
++Add CF_{Get,Set}CustomColor
++Add NF_DeleteTakeFromItem (issue 1097)
++BR_SetMediaItemImageResource: support setting displayed text in empty items unstretched or stretched (issue 1607)
++Improve NF functions documentation (post https://forum.cockos.com/showthread.php?p=2518891|2518891|)
+
+Misc:
++Use windows control IDs (instead of FindWindowEx()/SearchCildren()) for identifying various REAPER windows (post https://forum.cockos.com/showthread.php?p=2388026|2388026|)
++Workaround inaccurate arrange view scrollbar position (issue 1519, issue 1308)
+
+!v2.13 pre-release build (December 20, 2021)
+
+Actions:
++Add "Play/stop or Play/pause (obey 'SWS/NF: Toggle Play/stop or Play/pause' toggle state)" and "Toggle Play/stop (off) or Play/pause (on)" actions
++Add a "Add all regions to current playlist" action
++Allow customizing the amount of "SWS: Save/Restore time/loop selection" actions via [NbOfActions]/SWS_SAVETIME/RESTTIME/SAVELOOP/RESTLOOP in S&M.ini (issue 1405)
++Fix "Xenakios/SWS: Rename take (and) source files" actions if take is a section or is reversed (post https://forum.cockos.com/showpost.php?p=2300847|2300847|)
++Fix arrange view corruption when running "Play from mouse cursor position (perform until shortcut released)" with the mouse outside of the arrange view (issue 1551)
++Persist "link time selection and edit cursor" and "clear loop points on click in ruler" settings (issue 1442)
++Rename various "select region" actions to "time-select region"
++Restore compatibility with REAPER v5 of various clipboard actions on Linux and macOS
++Smart split actions: add support for REAPER v6.24+ razor edit areas (issue 1528)
++SWS/FNG: Set selected MIDI items name to first note: fix potential crash if MIDI octave display offset is set to a negative value (post https://forum.cockos.com/showpost.php?p=2421440|2421440|)
++Track grouping: support groups 33 to 64 (issue 1470)
+
+Auto color/icon/layout:
++Add new filters matching tracks having an instrument plugin or hardware audio/MIDI input/outputs
+
+Custom colors:
++Fix saving colors to the user palette on macOS 10.14 and newer (thread https://forum.cockos.com/showthread.php?t=205542|205542|, issue 1564)
+
+Cycle actions:
++Fix data loss when saving action section data larger than around 1MB on Windows (issue 1451)
++Fix S&M_Cycleaction.ini corruption when writing lines longer than 8191 bytes (issue 1439)
++Remove 8192 characters length limit in warning messages (issue 1438)
++Show a diagnostic message when a cycle action fails to be registered (issue 1436)
+
+Linux:
++Implement custom SWS cursors
+
+List view:
++Fix dragging cycle action commands or region playlists when scrolled (issue 1456)
++Fix list column context menu being shown even when right-clicking above the list on Linux and Windows (issue 1506)
+
+Loudness:
++Add dual mono scanning mode (issue 1209)
+
+Miscellaneous:
++Update TagLib to https://github.com/taglib/taglib/releases/tag/v1.12|v1.12|
+
+Notes:
++Fix notes being cleared when opening the window on Linux (issue 1546)
++Load font size from [Notes]/Fontsize in S&M.ini (issue 1157, issue 1517)
+
+MIDI Editor:
++Support REAPER v6.38's new custom note order/visibility mode (issue 1561)
+
+ReaConsole:
++Add new 'W' command to write non-persistent data via SetExtState() which can be used to create reusable scripts. Command is in the form 'W <section> <key> <any arbitrary string value>'
+
+ReaScript API:
++Add a return value for whether the source cue is a chapter marker to CF_EnumMediaSourceCues
++Add CF_GetMediaSourceBitRate (exposing REAPER v6.19's new PCM_SOURCE_EXT_GETBITRATE API, issue 1134)
++Add CF_GetTrackFXChainEx for accessing input/monitoring FX chains and chains from tracks in background projects (issue 1578)
++Add NF_ functions for getting, setting and clearing global/project/track selection actions (issue 974)
++Add NF_ReadAudioFileBitrate (supports more file types)
++Add SNM_SetStringConfigVar (issue 987)
++Deprecate {BR_TrackFX,NF_TakeFX}_GetFXModuleName (use {TrackFX,TakeFX}_GetNamedConfigParm from REAPER v6.37+ instead)
++Support deletion of a key by passing an empty value to BR_Win32_WritePrivateProfileString
+
+Vertical zoom and track height:
++Fix a crash when all tracks in the project are locked
++Obey track height lock on the selected tracks/selected item's tracks (issue 1577)
+
 !v2.12.1.3 featured build (February 6, 2021)
 
 <strong>Reminder:</strong> This version requires REAPER v5.982 or newer.

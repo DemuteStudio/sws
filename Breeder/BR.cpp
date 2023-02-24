@@ -97,7 +97,7 @@ bool BR_GlobalActionHook (int cmd, int val, int valhw, int relmode, HWND hwnd)
 
 bool BR_SwsActionHook (COMMAND_T* ct, int flagOrRelmode, HWND hwnd)
 {
-	int cmd = ct->accel.accel.cmd;
+	const int cmd = ct->cmdId;
 
 	// Action applies next action
 	if (cmd >= g_nextActionLoCmd && cmd <= g_nextActionHiCmd && g_nextActionApplyers.find(cmd) != g_nextActionApplyers.end())
@@ -473,6 +473,7 @@ static COMMAND_T g_commandTable[] =
 	{ { DEFACCEL, "SWS/BR: Normalize loudness of selected tracks to 0 LU" },            "BR_NORMALIZE_LOUDNESS_TRACKS_LU", NormalizeLoudness,          NULL, -2, },
 
 	{ { DEFACCEL, "SWS/BR/NF: Toggle use high precision mode for loudness analyzing" }, "BR_NF_TOGGLE_LOUDNESS_HIGH_PREC", ToggleHighPrecisionOption,  NULL, 0, IsHighPrecisionOptionEnabled},
+	{ { DEFACCEL, "SWS/BR/NF: Toggle use dual mono mode (for mono takes/channel modes) for loudness analyzing" }, "BR_NF_TOGGLE_LOUDNESS_DUAL_MONO", ToggleDualMonoOption,  NULL, 0, IsDualMonoOptionEnabled },
 
 	/******************************************************************************
 	* MIDI editor - Item preview                                                  *

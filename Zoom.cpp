@@ -97,6 +97,20 @@ void SetVertPos(HWND hwnd, int iTrack, bool bPixels, int iExtra = 0) // 1 based 
 	SendMessage(hwnd, WM_VSCROLL, si.nPos << 16 | SB_THUMBPOSITION, 0);
 }
 
+static float get_reaper_vzoom()
+{
+	if (ConfigVar<float> vzoom3 { "vzoom3" }) // REAPER v6.73+devXXXX
+		return *vzoom3;
+	return static_cast<float>(*ConfigVar<int>("vzoom2"));
+}
+
+static void set_reaper_vzoom(const float vz)
+{
+	// vzoom2 is ignored in REAPER v6.73+devXXXX onwards [p=2632786]
+	*ConfigVar<int>("vzoom2") = static_cast<int>(floor(vz+0.5));
+	ConfigVar<float>("vzoom3").try_set(vz);
+}
+
 void VertZoomRange(int iFirst, int iNum, bool* bZoomed, bool bMinimizeOthers, bool includeEnvelopes)
 {
 	HWND hTrackView = GetTrackWnd();
@@ -115,7 +129,8 @@ void VertZoomRange(int iFirst, int iNum, bool* bZoomed, bool bMinimizeOthers, bo
 
 	if (bMinimizeOthers)
 	{
-		*ConfigVar<int>("vzoom2") = 0;
+		set_reaper_vzoom(0.f);
+		int iMinimizedTracks = 0;
 		// setting I_HEIGHTOVERRIDE to 0 on locked track effectively disables track lock
 		// see https://forum.cockos.com/showthread.php?p=2202082
 		for (int i = 0; i <= GetNumTracks(); i++)
@@ -123,12 +138,15 @@ void VertZoomRange(int iFirst, int iNum, bool* bZoomed, bool bMinimizeOthers, bo
 			MediaTrack* tr = CSurf_TrackFromID(i, false);
 			const bool locked = GetMediaTrackInfo_Value(tr, "B_HEIGHTLOCK");
 			if (!obeyHeightLock || !locked)
+			{
 				SetMediaTrackInfo_Value(tr, "I_HEIGHTOVERRIDE", locked ? minTrackHeight : 0);
+				iMinimizedTracks += 1;
+			}		
 		}
 
 		Main_OnCommand(40112, 0); // Zoom out vert to minimize envelope lanes too (since vZoom is now 0) (calls refresh)
-		//TrackList_AdjustWindows(false);
-		//UpdateTimeline();
+		if (iMinimizedTracks <= 1) // ignore master track since there can be no items on it
+			return;
 
 		// Get the size of shown but not zoomed tracks
 		int iNotZoomedSize = 0;
@@ -150,7 +168,7 @@ void VertZoomRange(int iFirst, int iNum, bool* bZoomed, bool bMinimizeOthers, bo
 				{
 					int trackHeight = 0;
 					if (obeyHeightLock && locked)
-						GetSetMediaTrackInfo(tr, "I_HEIGHTOVERRIDE", &trackHeight);
+						trackHeight = static_cast<int>(GetMediaTrackInfo_Value(tr, "I_HEIGHTOVERRIDE"));
 					else
 						trackHeight = GetTrackHeightFromVZoomIndex(tr, 0);
 
@@ -249,7 +267,7 @@ void VertZoomRange(int iFirst, int iNum, bool* bZoomed, bool bMinimizeOthers, bo
 				{
 					const bool locked = GetMediaTrackInfo_Value(tr, "B_HEIGHTLOCK");
 					if (obeyHeightLock && locked)
-						GetSetMediaTrackInfo(tr, "I_HEIGHTOVERRIDE", &trackHeight);
+						trackHeight = static_cast<int>(GetMediaTrackInfo_Value(tr, "I_HEIGHTOVERRIDE"));
 					else
 						trackHeight = GetTrackHeightFromVZoomIndex(tr, iZoom);
 
@@ -276,7 +294,7 @@ void VertZoomRange(int iFirst, int iNum, bool* bZoomed, bool bMinimizeOthers, bo
 			if (!obeyHeightLock || !locked)
 				SetMediaTrackInfo_Value(tr, "I_HEIGHTOVERRIDE", locked ? trackHeight : 0);
 		}
-		*ConfigVar<int>("vzoom2") = iZoom;
+		set_reaper_vzoom(static_cast<float>(iZoom));
 		TrackList_AdjustWindows(false);
 		UpdateTimeline();
 	}
@@ -421,17 +439,22 @@ void ScrollToCursor(COMMAND_T* ct)
 	SetHorizPos(NULL, ct->user<0 && (GetPlayState()&1) ? GetPlayPosition() : GetCursorPosition(), 0.0, 0.01 * abs((int)ct->user));
 }
 
-void HorizScroll(COMMAND_T* ctx)
+void HorizScroll(const int amount)
 {
 	HWND hwnd = GetTrackWnd();
 	SCROLLINFO si = { sizeof(SCROLLINFO), };
 	si.fMask = SIF_ALL;
 	CoolSB_GetScrollInfo(hwnd, SB_HORZ, &si);
-	si.nPos += (int)((double)ctx->user * si.nPage / 100.0);
+	si.nPos += (int)((double)amount * si.nPage / 100.0);
 	if (si.nPos < 0) si.nPos = 0;
 	else if (si.nPos > si.nMax) si.nPos = si.nMax;
 	CoolSB_SetScrollInfo(hwnd, SB_HORZ, &si, true);
 	SendMessage(hwnd, WM_HSCROLL, SB_THUMBPOSITION, 0);
+}
+
+void HorizScroll(COMMAND_T * ctx)
+{
+	HorizScroll(static_cast<int>(ctx->user));
 }
 
 void ZoomToSelItems(COMMAND_T* ct)			{ VertZoomSelItems(0, ct ? (int)ct->user == 0 : false); HorizZoomSelItems(); }
@@ -448,7 +471,7 @@ class ArrangeState
 {
 private:
 	double dHZoom;
-	int iVZoom;
+	float fVZoom;
 	int iXPos;
 	int iYPos;
 	WDL_TypedBuf<int>  hbTrackHeights;
@@ -490,7 +513,7 @@ public:
 		// Vert
 		if (m_bVert)
 		{
-			iVZoom = *ConfigVar<int>("vzoom2");
+			fVZoom = get_reaper_vzoom();
 			hbTrackHeights.Resize(GetNumTracks()+1, false);
 			hbTrackVis.Resize(GetNumTracks()+1, false);
 			hbEnvHeights.Resize(0, false);
@@ -535,7 +558,7 @@ public:
 		// Vert zoom
 		if (m_bVert)
 		{
-			*ConfigVar<int>("vzoom2") = iVZoom;
+			set_reaper_vzoom(fVZoom);
 			int iSaved = hbTrackHeights.GetSize();
 			int iEnvPtr = 0;
 			for (int i = 0; i <= GetNumTracks(); i++)
@@ -741,7 +764,7 @@ private:
 	// Zoom
 	WDL_TypedBuf<int> m_iTrackHeights;
 	double m_dHZoom;
-	int m_iVZoom;
+	float m_fVZoom;
 	bool m_bProjExtents;
 
 	// Pos
@@ -749,7 +772,7 @@ private:
 	int m_iVPos, m_iHPos;
 
 public:
-	ZoomState():m_iTrackHeights(256),m_dHZoom(0.0),m_iVZoom(0),m_iVPos(0),m_iHPos(0),m_trVPos(NULL),m_bProjExtents(false) {}
+	ZoomState():m_iTrackHeights(256),m_dHZoom(0.0),m_fVZoom(0.f),m_iVPos(0),m_iHPos(0),m_trVPos(NULL),m_bProjExtents(false) {}
 	void SaveZoom()
 	{
 		// Save the track heights
@@ -759,7 +782,7 @@ public:
 			pHeights[i] = *(int*)GetSetMediaTrackInfo(CSurf_TrackFromID(i, false), "I_HEIGHTOVERRIDE", NULL);
 
 		m_dHZoom = GetHZoomLevel();
-		m_iVZoom = *ConfigVar<int>("vzoom2");
+		m_fVZoom = get_reaper_vzoom();
 		m_bProjExtents = false;
 	}
 	void ZoomToProject()
@@ -791,11 +814,11 @@ public:
 			ZoomToProject();
 
 		HWND hTrackView = GetTrackWnd();
-		if (!hTrackView || (m_dHZoom == 0.0 && m_iVZoom == 0))
+		if (!hTrackView || (m_dHZoom == 0.0 && m_fVZoom == 0.f))
 			return;
 
 		adjustZoom(m_dHZoom, 1, false, -1);
-		*ConfigVar<int>("vzoom2") = m_iVZoom;
+		set_reaper_vzoom(m_fVZoom);
 
 		// Restore track heights, ignoring the fact that tracks could have been added/removed
 		for (int i = 0; i < m_iTrackHeights.GetSize() && i <= GetNumTracks(); i++)
@@ -814,7 +837,7 @@ public:
 
 	bool IsZoomEqual(ZoomState* zs)
 	{	// Ignores the horiz/vert positions!
-		if (zs->m_dHZoom != m_dHZoom || zs->m_iVZoom != m_iVZoom)
+		if (zs->m_dHZoom != m_dHZoom || zs->m_fVZoom != m_fVZoom)
 			return false;
 		if (zs->m_iTrackHeights.GetSize() != m_iTrackHeights.GetSize())
 			return false;
@@ -827,7 +850,7 @@ public:
 	// Debug
 	//void Print(int i)
 	//{
-	//	dprintf("ZoomState %d: H: %.2f @ %d, V: %d @ %d, Proj: %s\n", i, m_dHZoom, m_iHPos, m_iVZoom, m_iVPos, m_bProjExtents ? "yes" : "no");
+	//	dprintf("ZoomState %d: H: %.2f @ %d, V: %g @ %d, Proj: %s\n", i, m_dHZoom, m_iHPos, m_fVZoom, m_iVPos, m_bProjExtents ? "yes" : "no");
 	//}
 };
 

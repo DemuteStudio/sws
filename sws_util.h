@@ -93,6 +93,7 @@ typedef struct COMMAND_T
 	int uniqueSectionId;
 	void(*onAction)(COMMAND_T*, int, int, int, HWND);
 	bool fakeToggle;
+	int cmdId;
 } COMMAND_T;
 
 
@@ -152,8 +153,6 @@ extern int g_i1;
 extern int g_i2;
 extern bool g_bTrue;
 extern bool g_bFalse;
-extern int g_iFirstCommand;
-extern int g_iLastCommand;
 extern MTRand g_MTRand;
 
 // Stuff to do in swell someday
@@ -179,7 +178,17 @@ void ShowColorChooser(COLORREF initialCol);
 bool GetChosenColor(COLORREF* pColor);
 void HideColorChooser();
 void SetMenuItemSwatch(HMENU hMenu, UINT pos, int size, COLORREF color);
+void SWS_Mac_MakeDefaultWindowMenu(HWND);
+void Mac_TextViewSetAllowsUndo(HWND, bool);
 #endif
+
+struct SWS_Cursor {
+  HCURSOR makeFromData();
+
+  int id, hotspot_x, hotspot_y;
+  unsigned char data[32*32];
+  HCURSOR inst;
+};
 
 HCURSOR SWS_LoadCursor(int id);
 #define MOUSEEVENTF_LEFTDOWN    0x0002 /* left button down */
@@ -203,6 +212,7 @@ bool SWSFreeUnregisterDynamicCmd(int id);
 
 void ActionsList(COMMAND_T*);
 int SWSGetCommandID(void (*cmdFunc)(COMMAND_T*), INT_PTR user = 0, const char** pMenuText = NULL);
+COMMAND_T** SWSGetCommand(int index);
 COMMAND_T* SWSGetCommandByID(int cmdId);
 int IsSwsAction(const char* _actionName);
 
@@ -233,11 +243,12 @@ bool TrackMatchesGuid(ReaProject*, MediaTrack*, const GUID*);
 inline bool TrackMatchesGuid(MediaTrack* tr, const GUID* g) { return TrackMatchesGuid(nullptr, tr, g); }
 const char *stristr(const char* a, const char* b);
 
-// NF: fix / workaround for setting take start offset doesn't work if containing stretch markers
-// see https://forum.cockos.com/showthread.php?t=180571
-// probably all functions setting take start offset should use this for now, until it's changed in REAPER
+// adjust take start offset obeying play rate and its stretch markers
 // caller must check for take != NULL
-void UpdateStretchMarkersAfterSetTakeStartOffset(MediaItem_Take* take, double takeStartOffset_multiplyPlayrate);
+void AdjustTakesStartOffset(MediaItem *, double adjustment);
+
+// returns source filename also if source is section/reversed (see PCM_source::GetFilename() comment)
+const char* SWS_GetSourceFileName(PCM_source* src);
 
 #ifdef _WIN32
   void dprintf(const char* format, ...);
@@ -254,6 +265,7 @@ void SWS_GetSelectedMediaItems(WDL_TypedBuf<MediaItem*>* buf);
 void SWS_GetSelectedMediaItemsOnTrack(WDL_TypedBuf<MediaItem*>* buf, MediaTrack* tr);
 int SWS_GetModifiers();
 bool SWS_IsWindow(HWND hwnd);
+void WaitUntil(bool(*)(void *), void *); // cannot use std::function on pre-c++11 macOS
 
 // Localization, sws_util.cpp
 #define _SWS_LOCALIZATION
@@ -268,4 +280,3 @@ TrackEnvelope* SWS_GetTrackEnvelopeByName(MediaTrack* track, const char* envname
 bool RegisterExportedFuncs(reaper_plugin_info_t* _rec);
 void UnregisterExportedFuncs();
 bool RegisterExportedAPI(reaper_plugin_info_t* _rec);
-

@@ -38,6 +38,7 @@
 #include "SnM_Window.h"
 #include "../url.h"
 #include "../Console/Console.h"
+#include "../cfillion/cfillion.hpp" // CF_GetCommandText()
 #include "../IX/IX.h"
 
 #include <WDL/localize/localize.h>
@@ -453,6 +454,20 @@ int ExplodeConsoleAction(int _section, const char* _cmdStr,
 // Perform cycle actions
 ///////////////////////////////////////////////////////////////////////////////
 
+// Actions 2000 through 2023 are special and handled by REAPER's ProcessCustomAction
+static bool PerformSpecialCustomActionCommand(const int cmdId)
+{
+	if (cmdId >= 2008 && cmdId <= 2012)
+	{
+		// REAPER's implementation checks GetTickCount in a loop every 10 ms
+		constexpr float secs[] { 0.1f, 0.5f, 1.f, 5.f, 10.f };
+		Sleep(static_cast<int>(secs[cmdId - 2008] * 1000));
+		return true;
+	}
+
+	return false;
+}
+
 // assumes _cmdStr is valid and has been "exploded", if needed
 int PerformSingleCommand(int _section, const char* _cmdStr, int _val, int _valhw, int _relmode, HWND _hwnd)
 {
@@ -474,6 +489,8 @@ int PerformSingleCommand(int _section, const char* _cmdStr, int _val, int _valhw
 			switch (_section)
 			{
 				case SNM_SEC_IDX_MAIN:
+					if(PerformSpecialCustomActionCommand(cmdId))
+						return 1;
 					return KBD_OnMainActionEx(cmdId, _val, _valhw, _relmode, _hwnd, NULL);
 				case SNM_SEC_IDX_ME:
 				case SNM_SEC_IDX_ME_EL:
@@ -793,7 +810,7 @@ void AppendWarnMsg(int _section, Cyclaction* _a, WDL_FastString* _outWarnMsg, co
 	{
 		WDL_FastString warnMsg;
 		warnMsg.AppendFormatted(256, 
-			__LOCALIZE_VERFMT("Warning: '%s' (section '%s') has been registered but it could be improved!","sws_DLG_161"), 
+			__LOCALIZE_VERFMT("Warning: '%s' (section '%s') has been exported but can't be shared with other users!","sws_DLG_161"), 
 			_a->GetName(), SNM_GetActionSectionName(_section));
 		warnMsg.Append("\n");
 		warnMsg.Append(__LOCALIZE("Details:","sws_DLG_161"));
@@ -815,7 +832,6 @@ bool CheckRegisterableCyclaction(int _section, Cyclaction* _a,
 	if (kbdSec && _a && !_a->IsEmpty())
 	{
 		WDL_FastString str;
-		bool warned = false;
 		int steps=0, statements=0, cmdSz=_a->GetCmdSize();
 		for (int i=0; i<cmdSz; i++)
 		{
@@ -982,27 +998,6 @@ bool CheckRegisterableCyclaction(int _section, Cyclaction* _a,
 					return AppendErrMsg(_section, _a, _applyMsg, str.Get());
 				}
 			}
-
-			///////////////////////////////////////////////////////////////////
-			// warnings?
-
-			if (_applyMsg)
-			{
-				if (!warned && // not already warned?
-					(strstr(cmd, "_CYCLACTION") ||
-					 strstr(cmd, "SWSCONSOLE_CUST") ||
-					 GetMacroOrScript(cmd, kbdSec->uniqueID, _macros, NULL) == 1)) // macros only, brutal but works for all sections
-				{
-					str.SetFormatted(256, __LOCALIZE_VERFMT("the identifier string '%s' cannot be shared with other users","sws_DLG_161"), cmd);
-					str.Append("\n");
-					str.AppendFormatted(256, __LOCALIZE_VERFMT("Tip: right-click this command > '%s'","sws_DLG_161"), __LOCALIZE("Explode into individual actions","sws_DLG_161"));
-					AppendWarnMsg(_section, _a, _applyMsg, str.Get());
-
-					// don't return false here, just a warning
-					warned = true;
-				}
-			}
-
 		} // for()
 
 		if ((steps+statements) == cmdSz)
@@ -1073,7 +1068,12 @@ int RegisterCyclation(Cyclaction* _a, int _section, int _cycleId,
 		sSubCAs.Delete(sSubCAs.Find(_a));
 
 		if (CheckRegisterableCyclaction(_section, _a, _macros, _consoles, _applyMsg))
-			return RegisterCyclation(_a->GetName(), _section, _cycleId, 0);
+		{
+			const int cmdid = RegisterCyclation(_a->GetName(), _section, _cycleId, 0);
+			if (!cmdid && _applyMsg)
+				AppendErrMsg(_section, _a, _applyMsg, __LOCALIZE("failed to be registered in the action list (you may have hit the global action limit)","sws_DLG_161"));
+			return cmdid;
+		}
 	}
 	return 0;
 }
@@ -1165,18 +1165,32 @@ void LoadCyclactions(bool _wantMsg, WDL_PtrList<Cyclaction>* _cyclactions = NULL
 // _cyclactions: NULL to update main model
 // _section: section index or -1 for all sections
 // _iniFn: NULL means S&M.ini
+// _wantWarning: display a warning about custom, cycle or console actions dependencies when exporting CAs 
 // remark: undo pref ignored, only saves cycle actions
-void SaveCyclactions(WDL_PtrList<Cyclaction>* _cyclactions = NULL, int _section = -1, const char* _iniFn = NULL)
+void SaveCyclactions(WDL_PtrList<Cyclaction>* _cyclactions = NULL, int _section = -1, const char* _iniFn = NULL, bool _wantWarning = false)
 {
 	if (!_cyclactions)
 		_cyclactions = g_cas;
+
+	if (!_iniFn)
+		_iniFn = g_SNM_CyclIniFn.Get();
+
+	std::ostringstream iniSection;
+	iniSection << "; Do not tweak by hand! Use the Cycle Action editor instead ===" << '\0'; // no localization for ini files...
+	iniSection << "Version=" << CA_VERSION << '\0'; // a section must contain at least one key to avoid corruption on Windows
+	SaveIniSection("Cyclactions", iniSection.str(), _iniFn);
+
+	char iniBuf[128]{};
+	WDL_FastString str, msg;
 
 	for (int sec=0; sec < SNM_MAX_CA_SECTIONS; sec++)
 	{
 		if (_section == sec || _section == -1)
 		{
+			const char *iniSection = GetCAIniSection(sec);
+			WritePrivateProfileStruct(iniSection, nullptr, nullptr, 0, _iniFn); // flush section
+
 			WDL_PtrList_DeleteOnDestroy<int> freeCycleIds;
-			WDL_FastString iniSection("; Do not tweak by hand! Use the Cycle Action editor instead\n"); // no localization for ini files..
 
 			// prepare ids "compression" (i.e. will re-assign ids of new actions for the next load)
 			for (int j=0; j < _cyclactions[sec].GetSize(); j++)
@@ -1184,37 +1198,64 @@ void SaveCyclactions(WDL_PtrList<Cyclaction>* _cyclactions = NULL, int _section 
 					freeCycleIds.Add(new int(j));
 
 			int maxId = 0;
+			int actionSecUniqueId = SNM_GetActionSectionUniqueId(sec);
 			for (int j=0; j < _cyclactions[sec].GetSize(); j++)
 			{
 				Cyclaction* a = _cyclactions[sec].Get(j);
-				if (!_cyclactions[sec].Get(j)->IsEmpty()) // skip empty cyclactions
+				if (_cyclactions[sec].Get(j)->IsEmpty()) // skip empty cyclactions
+					continue;
+
+				if (_wantWarning)
 				{
-					if (!a->m_added)
+					bool warned = false;
+					int cmdSz = a->GetCmdSize();
+					for (int i = 0; i < cmdSz; i++)
 					{
-						iniSection.AppendFormatted(CA_MAX_LEN, "Action%d=\"%s\"\n", j+1, a->GetDefinition());
-						maxId = max(j+1, maxId);
-					}
-					else
-					{
-						a->m_added = false;
-						if (freeCycleIds.GetSize())
+						const char* cmd = a->GetCmd(i);
+						if (!warned && // not already warned?
+							(strstr(cmd, "_CYCLACTION") ||
+								strstr(cmd, "SWSCONSOLE_CUST") ||
+								GetActionType(CF_GetCommandText(actionSecUniqueId, NamedCommandLookup(cmd)), true) == ActionType::Custom)) // // macros only
 						{
-							int id = *(freeCycleIds.Get(0));
-							iniSection.AppendFormatted(CA_MAX_LEN, "Action%d=\"%s\"\n", id+1, a->GetDefinition());
-							freeCycleIds.Delete(0, true);
-							maxId = max(id+1, maxId);
-						}
-						else
-						{
-							iniSection.AppendFormatted(CA_MAX_LEN, "Action%d=\"%s\"\n", ++maxId, a->GetDefinition()); 
+							str.SetFormatted(256, __LOCALIZE_VERFMT("the identifier string '%s' is a custom, cycle or console action which must be exported separately.", "sws_DLG_161"), cmd);
+							str.Append("\n");
+							str.AppendFormatted(256, __LOCALIZE_VERFMT("Tip: right-click this command > '%s'", "sws_DLG_161"), __LOCALIZE("Explode into individual actions", "sws_DLG_161"));
+							AppendWarnMsg(sec, a, &msg, str.Get());
+
+							warned = true;
 						}
 					}
 				}
+
+				int id;
+
+				if (a->m_added)
+				{
+					a->m_added = false;
+					if (freeCycleIds.GetSize())
+					{
+						id = *(freeCycleIds.Get(0)) + 1;
+						freeCycleIds.Delete(0, true);
+					}
+					else
+						id = ++maxId;
+				}
+				else
+					id = j+1;
+
+				maxId = max(id, maxId);
+
+				snprintf(iniBuf, sizeof(iniBuf), "Action%d", id);
+				WritePrivateProfileString(iniSection, iniBuf, a->GetDefinition(), _iniFn);
 			}
 			// "Nb_Actions" is a bad name now: it is a max id (kept for ascendant comp.)
-			iniSection.AppendFormatted(32, "Nb_Actions=%d\n", maxId);
-			iniSection.AppendFormatted(32, "Version=%d\n", CA_VERSION);
-			SaveIniSection(GetCAIniSection(sec), &iniSection, _iniFn ? _iniFn : g_SNM_CyclIniFn.Get());
+			snprintf(iniBuf, sizeof(iniBuf), "%d", maxId);
+			WritePrivateProfileString(iniSection, "Nb_Actions", iniBuf, _iniFn);
+			snprintf(iniBuf, sizeof(iniBuf), "%d", CA_VERSION);
+			WritePrivateProfileString(iniSection, "Version", iniBuf, _iniFn);
+
+			if (msg.GetLength())
+				SNM_ShowMsg(msg.Get(), __LOCALIZE("S&M - Warning", "sws_DLG_161"), g_caWndMgr.GetMsgHWND());
 		}
 	}
 }
@@ -1890,8 +1931,7 @@ void CommandsView::OnDrag()
 				g_editedAction->InsertCmd(iNewPriority, draggedItems.Get(i));
 			}
 
-			ListView_DeleteAllItems(m_hwndList); // because of the special sort criteria ("not sortable" somehow)
-			Update();
+			Update(true);
 
 			for (int i=0; i < draggedItems.GetSize(); i++)
 				SelectByItem((SWS_ListItem*)draggedItems.Get(i), i==0, i==0);
@@ -2275,13 +2315,13 @@ void CyclactionWnd::OnCommand(WPARAM wParam, LPARAM lParam)
 			break;
 		case EXPORT_SEL_MSG:
 		{
-			int x=0; WDL_PtrList_DeleteOnDestroy<Cyclaction> actions[SNM_MAX_CA_SECTIONS];
+			int x=0; WDL_PtrList<Cyclaction> actions[SNM_MAX_CA_SECTIONS];
 			while(Cyclaction* a = (Cyclaction*)g_lvL->EnumSelected(&x))
-				actions[g_editedSection].Add(new Cyclaction(a));
+				actions[g_editedSection].Add(a);
 			if (actions[g_editedSection].GetSize()) {
 				char fn[SNM_MAX_PATH] = "";
 				if (BrowseForSaveFile(__LOCALIZE("S&M - Export cycle actions","sws_DLG_161"), g_lastExportFn, strrchr(g_lastExportFn, '.') ? g_lastExportFn : NULL, SNM_INI_EXT_LIST, fn, sizeof(fn))) {
-					SaveCyclactions(actions, g_editedSection, fn);
+					SaveCyclactions(actions, g_editedSection, fn, true);
 					lstrcpyn(g_lastExportFn, fn, sizeof(g_lastExportFn));
 				}
 			}
@@ -2289,13 +2329,13 @@ void CyclactionWnd::OnCommand(WPARAM wParam, LPARAM lParam)
 		}
 		case EXPORT_CUR_SECTION_MSG:
 		{
-			WDL_PtrList_DeleteOnDestroy<Cyclaction> actions[SNM_MAX_CA_SECTIONS];
+			WDL_PtrList<Cyclaction> actions[SNM_MAX_CA_SECTIONS];
 			for (int i=0; i < g_editedActions[g_editedSection].GetSize(); i++)
-				actions[g_editedSection].Add(new Cyclaction(g_editedActions[g_editedSection].Get(i)));
+				actions[g_editedSection].Add(g_editedActions[g_editedSection].Get(i));
 			if (actions[g_editedSection].GetSize()) {
 				char fn[SNM_MAX_PATH] = "";
 				if (BrowseForSaveFile(__LOCALIZE("S&M - Export cycle actions","sws_DLG_161"), g_lastExportFn, strrchr(g_lastExportFn, '.') ? g_lastExportFn : NULL, SNM_INI_EXT_LIST, fn, sizeof(fn))) {
-					SaveCyclactions(actions, g_editedSection, fn);
+					SaveCyclactions(actions, g_editedSection, fn, true);
 					lstrcpyn(g_lastExportFn, fn, sizeof(g_lastExportFn));
 				}
 			}
@@ -2305,7 +2345,7 @@ void CyclactionWnd::OnCommand(WPARAM wParam, LPARAM lParam)
 		{
 			char fn[SNM_MAX_PATH] = "";
 			if (BrowseForSaveFile(__LOCALIZE("S&M - Export cycle actions","sws_DLG_161"), g_lastExportFn, g_lastExportFn, SNM_INI_EXT_LIST, fn, sizeof(fn))) {
-				SaveCyclactions(g_editedActions, -1, fn);
+				SaveCyclactions(g_editedActions, -1, fn, true);
 				lstrcpyn(g_lastExportFn, fn, sizeof(g_lastExportFn));
 			}
 			break;

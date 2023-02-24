@@ -41,6 +41,7 @@
 ******************************************************************************/
 namespace {
 	int gf_NFObeyTrackHeightLock;
+	int gf_NFTogglePlayStopPlayPause;
 }
 
 //////////////////////////////////////////////////////////////////
@@ -394,16 +395,11 @@ int IsRenderSpeedRealtime(COMMAND_T* = nullptr)
 
 void ToggleRenderSpeedRealtimeNotLim(COMMAND_T* = nullptr)
 {
-	const char* configStr = "workrender";
-	ConfigVar<int> option(configStr);
+	ConfigVar<int> option{"workrender"};
 	if (!option) return;
-
 	*option = ToggleBit(*option, 3);
+	option.save();
 	RefreshToolbar(0);
-
-	char tmp[256];
-	snprintf(tmp, sizeof(tmp), "%d", *option);
-	WritePrivateProfileString("reaper", configStr, tmp, get_ini_file());
 }
 
 // toggle Xenakios track height actions and SWS vertical zoom actions obey track height lock, #966
@@ -422,6 +418,25 @@ bool NF_IsObeyTrackHeightLockEnabled()
 {
 	return IsObeyTrackHeightLockEnabled();
 }
+
+static void TogglePlayStopPlayPause(COMMAND_T* ct = nullptr)
+{
+	gf_NFTogglePlayStopPlayPause = !gf_NFTogglePlayStopPlayPause;
+	WritePrivateProfileString(SWS_INI, "NFTogglePlayStopPlayPause", gf_NFTogglePlayStopPlayPause ? "1" : "0", get_ini_file());
+}
+
+int IsTogglePlayStopPlayPauseEnabled(COMMAND_T* _ct = nullptr) {
+	return gf_NFTogglePlayStopPlayPause;
+}
+
+static void PlayStopPlayPause(COMMAND_T* ct = nullptr)
+{
+	if (gf_NFTogglePlayStopPlayPause)
+		Main_OnCommand(40073, 0); // Transport: Play/pause
+	else
+		Main_OnCommand(40044, 0); // Transport: Play/stop
+}
+
 
 //////////////////////////////////////////////////////////////////
 //                                                              //
@@ -462,6 +477,9 @@ static COMMAND_T g_commandTable[] =
 	// toggle Xenakios track height actions and SWS vertical zoom actions obey track height lock
 	{ { DEFACCEL, "SWS/NF: Toggle obey track height lock in vertical zoom and track height actions" }, "NF_TOGGLE_OBEY_TRACK_HEIGHT_LOCK", ToggleObeyTrackHeightLock, NULL, 0, IsObeyTrackHeightLockEnabled},
 
+	{ { DEFACCEL, "SWS/NF: Toggle Play/stop (off) or Play/pause (on)" }, "NF_TOGGLE_PLAY_STOP_PLAY_PAUSE", TogglePlayStopPlayPause, NULL, 0, IsTogglePlayStopPlayPauseEnabled},
+	{ { DEFACCEL, "SWS/NF: Play/stop or Play/pause (obey 'SWS/NF: Toggle Play/stop or Play/pause' toggle state)" }, "NF_PLAY_STOP_PLAY_PAUSE", PlayStopPlayPause, NULL, 0},
+
 	//!WANT_LOCALIZE_1ST_STRING_END
 
 	{ {}, LAST_COMMAND, },
@@ -470,7 +488,8 @@ static COMMAND_T g_commandTable[] =
 int nofish_Init()
 {
 	SWSRegisterCommands(g_commandTable);
-	gf_NFObeyTrackHeightLock = GetPrivateProfileInt(SWS_INI, "NFObeyTrackHeightLock", 0, get_ini_file()); // disabled by default
+	gf_NFObeyTrackHeightLock     = GetPrivateProfileInt(SWS_INI, "NFObeyTrackHeightLock",     0, get_ini_file()); // disabled by default
+	gf_NFTogglePlayStopPlayPause = GetPrivateProfileInt(SWS_INI, "NFTogglePlayStopPlayPause", 0, get_ini_file());
 	return 1;
 }
 

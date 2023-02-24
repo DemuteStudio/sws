@@ -36,6 +36,7 @@
 #include "SnM_Util.h"
 #include "../Prompt.h"
 #include "WDL/xsrand.h"
+#include "cfillion/tempomarkerduplicator.hpp"
 
 #include <WDL/localize/localize.h>
 #include <WDL/projectcontext.h>
@@ -438,8 +439,7 @@ void RegionPlaylistView::OnDrag()
 			pl->Insert(iNewPriority, m_draggedItems.Get(i));
 		}
 
-		ListView_DeleteAllItems(m_hwndList); // because of the special sort criteria ("not sortable" somehow)
-		Update(); // no UpdateCompact() here, it would crash! see OnEndDrag()
+		Update(true); // no UpdateCompact() here, it would crash! see OnEndDrag()
 
 		for (int i=0; i < m_draggedItems.GetSize(); i++)
 			SelectByItem((SWS_ListItem*)m_draggedItems.Get(i), i==0, i==0);
@@ -874,26 +874,8 @@ void RegionPlaylistWnd::OnCommand(WPARAM wParam, LPARAM lParam)
 			}
 			break;
 		case ADD_ALL_REGIONS_MSG:
-		{
-			int x=0, y, num; bool isRgn, updt=false;
-			while ((y = EnumProjectMarkers2(NULL, x, &isRgn, NULL, NULL, NULL, &num)))
-			{
-				if (isRgn) {
-					RgnPlaylistItem* newItem = new RgnPlaylistItem(MakeMarkerRegionId(num, isRgn));
-					updt |= (GetPlaylist() && GetPlaylist()->Add(newItem) != NULL);
-				}
-				x=y;
-			}
-			if (updt)
-			{
-				Undo_OnStateChangeEx2(NULL, UNDO_PLAYLIST_STR, UNDO_STATE_MISCCFG, -1);
-				PlaylistResync();
-				Update();
-			}
-			else
-				MessageBox(m_hwnd, __LOCALIZE("No region found in project!","sws_DLG_165"), __LOCALIZE("S&M - Error","sws_DLG_165"), MB_OK);
+			AddAllRegionsToPlaylist();
 			break;
-		}
 		default:
 			if (LOWORD(wParam) >= INSERT_REGION_START_MSG && LOWORD(wParam) <= INSERT_REGION_END_MSG)
 			{
@@ -1024,7 +1006,7 @@ void RegionPlaylistWnd::DrawControls(LICE_IBitmap* _bm, const RECT* _r, int* _to
 						m_txtPlaylist.SetText(hasPlaylists ? __LOCALIZE("Playlist #","sws_DLG_165") : __LOCALIZE("Playlist: None","sws_DLG_165"));
 						if (SNM_AutoVWndPosition(DT_LEFT, &m_txtPlaylist, NULL, _r, &x0, _r->top, h, hasPlaylists?4:SNM_DEF_VWND_X_STEP))
 						{
-							if (!hasPlaylists || (hasPlaylists && SNM_AutoVWndPosition(DT_LEFT, &m_cbPlaylist, &m_txtPlaylist, _r, &x0, _r->top, h, 4)))
+							if (!hasPlaylists || SNM_AutoVWndPosition(DT_LEFT, &m_cbPlaylist, &m_txtPlaylist, _r, &x0, _r->top, h, 4))
 							{
 								m_btnDel.SetEnabled(hasPlaylists);
 								if (SNM_AutoVWndPosition(DT_LEFT, &m_btnsAddDel, NULL, _r, &x0, _r->top, h))
@@ -1409,7 +1391,7 @@ void PlaylistRun()
 		{
 			// a bunch of calls end here when looping!!
 
-			if (!g_plLoop || (g_plLoop && (g_unsync || pos<g_lastRunPos)))
+			if (!g_plLoop || g_unsync || pos<g_lastRunPos)
 			{
 				g_plLoop = false;
 
@@ -1843,8 +1825,11 @@ void AppendPasteCropPlaylist(RegionPlaylist* _playlist, const AppendPasteCropPla
 		{"envattach",      1}, // move with items
 		{"projgroupover",  1}, // disable item grouping
 		{"splitautoxfade", 0}, // disable overlapping items when splitting
+		{"itemtimelock",   0}, // item/env timebase = time
 	};
 	(void)options;
+
+	TempoMarkerDuplicator tempoMap;
 
 	WDL_PtrList_DeleteOnDestroy<MarkerRegion> rgns;
 	for (int i=0; i < _playlist->GetSize(); i++)
@@ -1891,6 +1876,7 @@ void AppendPasteCropPlaylist(RegionPlaylist* _playlist, const AppendPasteCropPla
 				for (int k = 0; k < plItem->m_cnt; k++)
 				{
 					DupSelItems(NULL, endPos-rgnpos, &itemsToKeep); // overrides the native ApplyNudge()
+					tempoMap.copyRange(rgnpos, rgnend, endPos - rgnpos);
 					endPos += (rgnend-rgnpos);
 				}
 
@@ -1922,11 +1908,14 @@ void AppendPasteCropPlaylist(RegionPlaylist* _playlist, const AppendPasteCropPla
 		return;
 	}
 
+	tempoMap.commit();
+
 	///////////////////////////////////////////////////////////////////////////
 	// append/paste to current project
 	if (_mode == PASTE_PROJECT || _mode == PASTE_CURSOR)
 	{
-//		Main_OnCommand(40289, 0); // unselect all items
+		// Main_OnCommand(40289, 0); // unselect all items
+
 		SetEditCurPos2(NULL, endPos, true, false);
 
 		PreventUIRefresh(-1);
@@ -1997,6 +1986,7 @@ void AppendPasteCropPlaylist(RegionPlaylist* _playlist, const AppendPasteCropPla
 	Main_OnCommand(40210, 0); // copy tracks
 
 	PreventUIRefresh(-1);
+	tempoMap = TempoMarkerDuplicator {}; // reload after cropping to commit in new tab
 
 	// trick!
 	Undo_EndBlock2(NULL, __LOCALIZE("Crop project to playlist","sws_undo"), UNDO_STATE_ALL);
@@ -2013,6 +2003,10 @@ void AppendPasteCropPlaylist(RegionPlaylist* _playlist, const AppendPasteCropPla
 	Undo_BeginBlock2(NULL);
 
 	PreventUIRefresh(1);
+
+	// write tempo envelope before pasting items for items to retain
+	// the correct position and rate regardless of current timebase settings
+	tempoMap.commit();
 
 	Main_OnCommand(40058, 0); // paste item/tracks
 	Main_OnCommand(40297, 0); // unselect all tracks
@@ -2126,7 +2120,7 @@ static void SaveExtensionConfig(ProjectStateContext *ctx, bool isUndo, struct pr
 				confStr.AppendFormatted(128,"%d %d\n", item->m_rgnId, item->m_cnt);
 
 		// ignore empty playlists when saving but always take them into account for undo
-		if (isUndo || (!isUndo && confStr.GetLength() > iHeaderLen)) {
+		if (isUndo || confStr.GetLength() > iHeaderLen) {
 			confStr.Append(">\n");
 			StringToExtensionConfig(&confStr, ctx);
 		}
@@ -2229,4 +2223,46 @@ void ToggleRegionPlaylistLock(COMMAND_T*) {
 
 int IsRegionPlaylistMonitoring(COMMAND_T*) {
 	return g_monitorMode;
+}
+
+void AddAllRegionsToPlaylist(COMMAND_T *ct)
+{
+	RegionPlaylist *playlist { GetPlaylist() };
+	RegionPlaylistWnd *w { g_rgnplWndMgr.Get() };
+	HWND parent { w && !ct ? w->GetHWND() : GetMainHwnd() };
+
+	if (!playlist) {
+		MessageBox(parent,
+			__LOCALIZE("No region playlist found in project!","sws_DLG_165"),
+			__LOCALIZE("S&M - Error","sws_DLG_165"), MB_OK);
+		return;
+	}
+
+	int x {}, y, num; bool isRgn, updt { false };
+	while ((y = EnumProjectMarkers2(nullptr, x, &isRgn, nullptr, nullptr, nullptr, &num)))
+	{
+		x=y;
+
+		if (!isRgn)
+			continue;
+
+		RgnPlaylistItem *newItem { new RgnPlaylistItem(MakeMarkerRegionId(num, isRgn)) };
+
+		if (GetPlaylist()->Add(newItem))
+			updt = true;
+		else
+			delete newItem;
+	}
+
+	if (!updt) {
+		MessageBox(parent,
+			__LOCALIZE("No region found in project!","sws_DLG_165"),
+			__LOCALIZE("S&M - Error","sws_DLG_165"), MB_OK);
+		return;
+	}
+
+	Undo_OnStateChangeEx2(nullptr, UNDO_PLAYLIST_STR, UNDO_STATE_MISCCFG, -1);
+	PlaylistResync();
+	if (w)
+		w->Update();
 }

@@ -371,7 +371,7 @@ void ShowThemeHelper(WDL_FastString* _report, HWND _hwnd, bool _mcp, bool _sel)
 				{
 					MediaTrack* tr = (MediaTrack*)GetWindowLongPtr(w, GWLP_USERDATA);
 					int trIdx = CSurf_TrackToID(tr, false);
-					if (trIdx>=0 && (!_sel || (_sel && *(int*)GetSetMediaTrackInfo(tr, "I_SELECTED", NULL))))
+					if (trIdx>=0 && (!_sel || GetMediaTrackInfo_Value(tr, "I_SELECTED")))
 					{
 						RECT r;	GetClientRect(w, &r);
 						char* trName = (char*)GetSetMediaTrackInfo(tr, "P_NAME", NULL);
@@ -475,6 +475,18 @@ HWND GetActionListBox(char* _currentSection, int _sectionSz)
 	return (actionsWnd ? GetDlgItem(actionsWnd, 0x52B) : NULL);
 }
 
+LPARAM ListView_GetOwnerDataListViewParam(HWND list, int row)
+{
+	NMLVDISPINFO n = {
+#ifdef _WIN32 // suppress LVN_GETDISPINFO Arithmetic overflow warning in VS
+	#pragma warning(suppress:26454) 
+#endif
+		{ list, static_cast<UINT_PTR>(GetWindowLong(list,GWL_ID)), LVN_GETDISPINFO },
+		{ LVIF_PARAM, row, 0, }
+	};
+	SendMessage(GetParent(list), WM_NOTIFY, n.hdr.idFrom, (LPARAM)&n);
+	return n.item.lParam;
+}
 
 // returns the list view's selected item, or:
 // -1 if the action wnd is not opened
@@ -499,6 +511,9 @@ int GetSelectedAction(char* _section, int _secSize, int* _cmdId, char* _id, int 
 				if (li.state == LVIS_SELECTED)
 				{
 					int cmdId = (int)li.lParam;
+#ifdef _WIN32		// https://forum.cockos.com/showpost.php?p=2527570
+					if (!cmdId) cmdId = (int)ListView_GetOwnerDataListViewParam(hList, i);
+#endif
 					if (_cmdId) *_cmdId = cmdId;
 
 					char actionName[SNM_MAX_ACTION_NAME_LEN] = "";
@@ -585,7 +600,7 @@ void ShowFXChain(COMMAND_T* _ct)
 	{
 		MediaTrack* tr = CSurf_TrackFromID(i, false);
 		// NULL _ct => all tracks, selected tracks otherwise
-		if (tr && (!_ct || (_ct && *(int*)GetSetMediaTrackInfo(tr, "I_SELECTED", NULL))))
+		if (tr && (!_ct || GetMediaTrackInfo_Value(tr, "I_SELECTED")))
 			TrackFX_Show(tr, (focusedFX == -1 ? GetSelectedTrackFX(tr) : focusedFX), 1);
 	}
 }
@@ -597,7 +612,7 @@ void HideFXChain(COMMAND_T* _ct)
 	for (int i=0; i <= GetNumTracks(); i++) // incl. master
 	{
 		MediaTrack* tr = CSurf_TrackFromID(i, false);
-		if (tr && (!_ct || (_ct && *(int*)GetSetMediaTrackInfo(tr, "I_SELECTED", NULL)))) 
+		if (tr && (!_ct || GetMediaTrackInfo_Value(tr, "I_SELECTED")))
 		{
 			TrackFX_Show(tr, -1, 0); // no valid index required for closing FX chain
 
@@ -622,7 +637,7 @@ void ToggleFXChain(COMMAND_T* _ct)
 	{
 		MediaTrack* tr = CSurf_TrackFromID(i, false);
 		// NULL _ct => all tracks, selected tracks otherwise
-		if (tr && (!_ct || (_ct && *(int*)GetSetMediaTrackInfo(tr, "I_SELECTED", NULL)))) {
+		if (tr && (!_ct || GetMediaTrackInfo_Value(tr, "I_SELECTED"))) {
 			int currentFX = TrackFX_GetChainVisible(tr);
 			TrackFX_Show(tr, GetSelectedTrackFX(tr), (currentFX == -2 || currentFX >= 0) ? 0 : 1);
 		}
@@ -688,7 +703,7 @@ void ToggleFloatTakeFX(MediaItem_Take* _take, int _fx)
 // showflag=0 for toggle, =2 for hide floating window (valid index), =3 for show floating window (valid index)
 void FloatUnfloatFXs(MediaTrack* _tr, bool _all, int _showFlag, int _fx, bool _selTracks) 
 {
-	bool matchTrack = (_tr && (!_selTracks || (_selTracks && *(int*)GetSetMediaTrackInfo(_tr, "I_SELECTED", NULL))));
+	const bool matchTrack = _tr && (!_selTracks || GetMediaTrackInfo_Value(_tr, "I_SELECTED"));
 	if (_all && matchTrack)
 	{
 		int nbFx = TrackFX_GetCount(_tr);
@@ -705,7 +720,7 @@ void FloatUnfloatFXs(MediaTrack* _tr, bool _all, int _showFlag, int _fx, bool _s
 
 void FloatUnfloatTakeFXs(MediaTrack * _tr, bool _all, int _showFlag, int _fx, bool _selTracks)
 {
-	bool matchTrack = (_tr && (!_selTracks || (_selTracks && *(int*)GetSetMediaTrackInfo(_tr, "I_SELECTED", NULL))));
+	const bool matchTrack = _tr && (!_selTracks || GetMediaTrackInfo_Value(_tr, "I_SELECTED"));
 	if (_all && matchTrack)
 	{
 		for (int k = 0; k < CountTrackMediaItems(_tr); k++)
@@ -767,7 +782,7 @@ void FloatUnfloatFXs(bool _all, int _showFlag, int _fx, bool _selTracks)
 	for (int i=0; i <= GetNumTracks(); i++) // incl. master
 	{
 		MediaTrack* tr = CSurf_TrackFromID(i, false);
-		if (tr && (_all || !_selTracks || (_selTracks && *(int*)GetSetMediaTrackInfo(tr, "I_SELECTED", NULL))))
+		if (tr && (_all || !_selTracks || GetMediaTrackInfo_Value(tr, "I_SELECTED")))
 			FloatUnfloatFXs(tr, _all, _showFlag, _fx, _selTracks);
 	}
 }
@@ -780,7 +795,7 @@ void FloatUnfloatTakeFXs(bool _all, int _showFlag, int _fx, bool _selTracks)
 	for (int i = 1; i <= GetNumTracks(); i++) // skip master
 	{
 		MediaTrack* tr = CSurf_TrackFromID(i, false);
-		if (tr && (_all || !_selTracks || (_selTracks && *(int*)GetSetMediaTrackInfo(tr, "I_SELECTED", NULL))))
+		if (tr && (_all || !_selTracks || GetMediaTrackInfo_Value(tr, "I_SELECTED")))
 			FloatUnfloatTakeFXs(tr, _all, _showFlag, _fx, _selTracks);
 	}
 }
@@ -889,7 +904,7 @@ bool CycleTracksAndFXs(int _trStart, int _fxStart, int _dir, bool _selectedTrack
 
 		MediaTrack* tr = CSurf_TrackFromID(i, false);
 		int fxCount = tr ? TrackFX_GetCount(tr) : 0;
-		if (tr && fxCount &&  (!_selectedTracks || (_selectedTracks && *(int*)GetSetMediaTrackInfo(tr, "I_SELECTED", NULL))))
+		if (tr && fxCount &&  (!_selectedTracks || GetMediaTrackInfo_Value(tr, "I_SELECTED")))
 		{
 			int cpt2 = 0;
 			int j = (i==_trStart ? _fxStart+_dir : (_dir<0 ? fxCount-1 : 0));
@@ -932,7 +947,7 @@ bool FloatOnlyJob(MediaTrack* _tr, int _fx, bool _selectedTracks)
 	{
 		MediaTrack* tr = CSurf_TrackFromID(i, false);
 		int fxCount = (tr ? TrackFX_GetCount(tr) : 0);
-		if (fxCount && (!_selectedTracks || (_selectedTracks && *(int*)GetSetMediaTrackInfo(tr, "I_SELECTED", NULL))))
+		if (fxCount && (!_selectedTracks || GetMediaTrackInfo_Value(tr, "I_SELECTED")))
 			for (int j = 0; j < fxCount; j++)
 				if (tr != _tr || j != _fx) 
 					FloatUnfloatFXs(tr, false, 2, j, true);
@@ -954,7 +969,7 @@ bool CycleFocusFXWnd(int _dir, bool _selectedTracks, bool* _cycled)
 		{
 			MediaTrack* tr = CSurf_TrackFromID(i, false);
 			if (tr && TrackFX_GetCount(tr) && 
-				(!_selectedTracks || (_selectedTracks && *(int*)GetSetMediaTrackInfo(tr, "I_SELECTED", NULL))))
+				(!_selectedTracks || GetMediaTrackInfo_Value(tr, "I_SELECTED")))
 			{
 				int prevFocused = GetFocusedTrackFXWnd(tr);
 				if (firstFXFound < 0)
@@ -969,7 +984,7 @@ bool CycleFocusFXWnd(int _dir, bool _selectedTracks, bool* _cycled)
 
 		// there was no already focused window if we're here..
 		// => focus the 1st found one
-		if (firstTrFound) 
+		if (firstTrFound)
 			return FocusJob(firstTrFound, firstFXFound, _selectedTracks);
 	}
 	return false;
@@ -1013,7 +1028,7 @@ void CycleFocusFXMainWnd(int _dir, bool _selectedTracks, bool _showmain)
 			{
 				MediaTrack* tr = CSurf_TrackFromID(trCpt, false);
 				int fxCount = (tr ? TrackFX_GetCount(tr) : 0);
-				if (fxCount && (!_selectedTracks || (_selectedTracks && *(int*)GetSetMediaTrackInfo(tr, "I_SELECTED", NULL))))
+				if (fxCount && (!_selectedTracks || GetMediaTrackInfo_Value(tr, "I_SELECTED")))
 				{
 					for (int j = (_dir > 0 ? 0 : (fxCount-1)); (j < fxCount) && (j>=0); j+=_dir)
 					{

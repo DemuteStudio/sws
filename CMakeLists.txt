@@ -7,6 +7,7 @@ option(USE_SYSTEM_TAGLIB "Link against the system-provided TagLib"       OFF)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 include(CheckCXXCompilerFlag)
+include(FindPkgConfig)
 
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
   if(WIN32)
@@ -40,16 +41,6 @@ endif()
 
 STRING(TOLOWER "${ARCH_NAME}" ARCH_NAME)
 
-if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/reaper_plugin_functions.h")
-  message(FATAL_ERROR
-    "reaper_plugin_functions.h cannot be found in "
-    "${CMAKE_CURRENT_SOURCE_DIR}/vendor.\n"
-
-    "Generate it using the following REAPER action: "
-    "[developer] Write C++ API functions header."
-  )
-endif()
-
 set(CMAKE_CXX_VISIBILITY_PRESET "hidden")
 set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME sws) # avoid an empty "Unspecified" component
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -76,6 +67,9 @@ if(MSVC)
 
   # Global compiler flags (all targets)
   add_compile_options(
+    # Source encoding independent of the current system locale
+    /utf-8
+
     # Buffer security check
     /GS
 
@@ -96,7 +90,7 @@ if(MSVC)
     /Zc:threadSafeInit-
   )
 else()
-  add_compile_options(-fstack-protector-strong -fdiagnostics-color)
+  add_compile_options(-fsigned-char -fstack-protector-strong -fdiagnostics-color)
 endif()
 
 find_package(PHP REQUIRED)
@@ -144,9 +138,6 @@ add_library(sws SHARED
   sws_util.cpp
   sws_waitdlg.cpp
   sws_wnd.cpp
-  Utility/Base64.cpp
-  Utility/envelope.cpp
-  Utility/hidpi.cpp
   Zoom.cpp
 )
 
@@ -161,6 +152,7 @@ target_compile_features(sws PRIVATE cxx_std_11)
 target_include_directories(sws PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${CMAKE_CURRENT_SOURCE_DIR}/vendor
+  ${CMAKE_CURRENT_SOURCE_DIR}/vendor/reaper-sdk/sdk
   ${CMAKE_CURRENT_BINARY_DIR}
 )
 
@@ -188,6 +180,12 @@ if(SWELL_FOUND)
     DEPENDS ${SWELL_RESGEN}
     MAIN_DEPENDENCY sws_extension.rc
   )
+
+  if(NOT APPLE)
+    pkg_search_module(GDK REQUIRED gdk-3.0 gdk-2.0)
+    # not linking: REAPER takes care of loading GDK via the SWELL_WANT_LOAD_LIBRARY mechanism
+    target_include_directories(sws PRIVATE ${GDK_INCLUDE_DIRS})
+  endif()
 endif()
 
 if(MSVC)
@@ -220,6 +218,7 @@ if(MSVC)
   add_library(pch OBJECT stdafx.cpp)
   target_include_directories(pch PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor
+    ${CMAKE_CURRENT_SOURCE_DIR}/vendor/reaper-sdk/sdk
     ${WDL_INCLUDE_DIR}
   )
   add_dependencies(sws pch)
@@ -299,6 +298,7 @@ add_subdirectory(Snapshots)
 add_subdirectory(SnM)
 add_subdirectory(snooks)
 add_subdirectory(TrackList)
+add_subdirectory(Utility)
 add_subdirectory(Wol)
 add_subdirectory(Xenakios)
 

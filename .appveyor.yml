@@ -2,30 +2,50 @@
 version: "{build}-{branch}"
 
 before_build:
-  - curl -fsSL https://gist.github.com/cfillion/da355e8278048de08ae065d6fe6031c1/raw/reaper_plugin_functions.h -o vendor/reaper_plugin_functions.h
-  - git submodule update --init
+  - git submodule update --init --depth 1
 
 for:
   - matrix: { only: [ appveyor_build_worker_image: &linux Ubuntu1804 ] }
     install: |-
       set -e
 
-      sudo apt-get update -qq
-      sudo apt-get install -qq --no-install-recommends php-cli > /dev/null
+      sudo sed -i '/arch=/! s/^deb/deb [arch=amd64,i386]/' /etc/apt/sources.list
+      awk '
+      $3 !~ /ubuntu\.com/ { next }
+      $1 == "deb" {
+        $2 = "[arch=armhf,arm64]";
+        $3 = "http://ports.ubuntu.com/ubuntu-ports/"
+      } 1' /etc/apt/sources.list | sudo tee /etc/apt/sources.list.d/ports.list > /dev/null
+
+      install-deps() {
+        local arch="$1"; shift
+        local native=("$@" php-cli)
+        local target=(libgtk-3-dev)
+
+        sudo dpkg --add-architecture $arch
+        sudo apt-get update -qq
+        sudo apt-get install -qq aptitude > /dev/null
+        sudo aptitude install -yR ${native[@]} ${target[@]/%/:$arch} > /dev/null
+      }
+
+      sudo update-alternatives --set gcc /usr/bin/gcc-7
 
       case $ARCH in
+      x86_64)
+        install-deps amd64
+        ;;
       i686)
-        sudo apt-get install -qq g++-multilib > /dev/null
+        install-deps i386 g++-multilib
         export TOOLCHAIN=../cmake/linux-cross.cmake \
                TOOLCHAIN_PREFIX=i386-linux-gnu
         ;;
       armv7l)
-        sudo apt-get install -qq g++-arm-linux-gnueabihf > /dev/null
+        install-deps armhf g++-arm-linux-gnueabihf
         export TOOLCHAIN=../cmake/linux-cross.cmake \
                TOOLCHAIN_PREFIX=arm-linux-gnueabihf
         ;;
       aarch64)
-        sudo apt-get install -qq g++-aarch64-linux-gnu > /dev/null
+        install-deps arm64 g++-aarch64-linux-gnu
         export TOOLCHAIN=../cmake/linux-cross.cmake \
                TOOLCHAIN_PREFIX=aarch64-linux-gnu
         ;;
@@ -77,7 +97,7 @@ for:
     artifacts:
       - path: build/sws*.dmg
 
-  - matrix: { only: [ appveyor_build_worker_image: &windows Visual Studio 2019 ] }
+  - matrix: { only: [ appveyor_build_worker_image: &windows Visual Studio 2022 ] }
     install:
       # Use NSIS v2.46 to reduce AV false positives
       - '"%ProgramFiles(x86)%\NSIS\uninst-nsis.exe" /S'
@@ -88,8 +108,8 @@ for:
       - refreshenv
       - curl -fsSLO https://nsis.sourceforge.io/mediawiki/images/1/18/NsProcess.zip
       - 7z e nsProcess.zip -o"%ProgramFiles(x86)%\NSIS\Unicode\Plugins" nsProcessW.dll -r
-      - if "%ARCH%" == "x64" call "%ProgramFiles(x86)%\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvars64.bat"
-      - if "%ARCH%" == "x86" call "%ProgramFiles(x86)%\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvars32.bat"
+      - if "%ARCH%" == "x64" call "%ProgramFiles%\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
+      - if "%ARCH%" == "x86" call "%ProgramFiles%\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars32.bat"
     build_script:
       - mkdir build && cd build
       - cmake .. -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo

@@ -66,13 +66,13 @@ bool g_SNM_ClearType = true;
 
 ColorTheme* SNM_GetColorTheme(bool _checkForSize) {
 	int sz; ColorTheme* ct = (ColorTheme*)GetColorThemeStruct(&sz);
-	if (ct && (!_checkForSize || (_checkForSize && sz >= sizeof(ColorTheme)))) return ct;
+	if (ct && (!_checkForSize || sz >= sizeof(ColorTheme))) return ct;
 	return NULL;
 }
 
 IconTheme* SNM_GetIconTheme(bool _checkForSize) {
 	int sz; IconTheme* it = (IconTheme*)GetIconThemeStruct(&sz);
-	if (it && (!_checkForSize || (_checkForSize && sz >= sizeof(IconTheme)))) return it;
+	if (it && (!_checkForSize || sz >= sizeof(IconTheme))) return it;
 	return NULL;
 }
 
@@ -240,9 +240,7 @@ WDL_DLGRET SNM_HookThemeColorsMessage(HWND _hwnd, UINT _uMsg, WPARAM _wParam, LP
 
 void SNM_ShowMsg(const char* _msg, const char* _title, HWND _hParent)
 {
-	char msg[1024*8] = "";
-	GetStringWithRN(_msg, msg, sizeof(msg)); // truncates if needed
-	DisplayInfoBox(_hParent?_hParent:GetMainHwnd(), _title, msg, false, false); // modeless
+	DisplayInfoBox(_hParent?_hParent:GetMainHwnd(), _title, GetStringWithRN(_msg).c_str(), false, false); // modeless
 }
 
 // for modeless box created with SNM_ShowMsg()

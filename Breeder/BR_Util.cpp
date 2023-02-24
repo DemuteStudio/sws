@@ -33,6 +33,7 @@
 #include "BR_EnvelopeUtil.h"
 #include "BR_MidiUtil.h"
 #include "BR_Misc.h"
+#include "../cfillion/cfillion.hpp" // CF_GetScrollInfo
 #include "../SnM/SnM.h"
 #include "../SnM/SnM_Chunk.h"
 #include "../SnM/SnM_Dlg.h"
@@ -1283,6 +1284,7 @@ bool SetMediaSourceProperties (MediaItem_Take* take, bool section, double start,
 							AppendLine(sourceStr, line);
 						}
 					}
+					delete ctx;
 				}
 			}
 			else if (getSectionDefaults)
@@ -1638,7 +1640,7 @@ bool InsertStretchMarkersInAllItems (const vector<double>& stretchMarkers, bool 
 {
 	bool updated = true;
 
-	if (!IsLocked(ITEM_FULL) && !IsLocked(STRETCH_MARKERS) && (!obeySwsOptions || (obeySwsOptions && IsSetAutoStretchMarkersOn(NULL))))
+	if (!IsLocked(ITEM_FULL) && !IsLocked(STRETCH_MARKERS) && (!obeySwsOptions || IsSetAutoStretchMarkersOn(nullptr)))
 	{
 		const int itemCount = CountMediaItems(NULL);
 		for (int i = 0; i < itemCount; ++i)
@@ -2145,7 +2147,7 @@ int GetTrackHeight (MediaTrack* track, int* offsetY, int* topGap /*=NULL*/, int*
 	{
 		// Get track's start Y coordinate
 		SCROLLINFO si{sizeof(SCROLLINFO), SIF_POS};
-		CoolSB_GetScrollInfo(GetArrangeWnd(), SB_VERT, &si);
+		CF_GetScrollInfo(GetArrangeWnd(), SB_VERT, &si);
 
 		*offsetY = si.nPos + static_cast<int>(GetMediaTrackInfo_Value(track, "I_TCPY"));
 	}
@@ -2215,7 +2217,7 @@ int GetTrackEnvHeight (TrackEnvelope* envelope, int* offsetY, bool drawableRange
 
 	if (offsetY) {
 		SCROLLINFO si{sizeof(SCROLLINFO), SIF_POS};
-		CoolSB_GetScrollInfo(GetArrangeWnd(), SB_VERT, &si);
+		CF_GetScrollInfo(GetArrangeWnd(), SB_VERT, &si);
 
 		const int trackY = si.nPos + static_cast<int>(GetMediaTrackInfo_Value(track, "I_TCPY"));
 
@@ -2303,7 +2305,7 @@ void ScrollToTrackIfNotInArrange (MediaTrack* track)
 	HWND hwnd = GetArrangeWnd();
 	SCROLLINFO si = { sizeof(SCROLLINFO), };
 	si.fMask = SIF_ALL;
-	CoolSB_GetScrollInfo(hwnd, SB_VERT, &si);
+	CF_GetScrollInfo(hwnd, SB_VERT, &si);
 
 	int trackEnd = offsetY + height;
 	int pageEnd = si.nPos + (int)si.nPage + SCROLLBAR_W;
@@ -2349,7 +2351,7 @@ RECT GetDrawableArrangeArea ()
 
 	SCROLLINFO si = { sizeof(SCROLLINFO), };
 	si.fMask = SIF_ALL;
-	CoolSB_GetScrollInfo(arrangeWnd, SB_VERT, &si);
+	CF_GetScrollInfo(arrangeWnd, SB_VERT, &si);
 	#ifdef _WIN32
 		int pageEnd = si.nPos + si.nPage + SCROLLBAR_W + 1;
 	#else
@@ -2424,7 +2426,7 @@ static HWND SearchChildren (const char* name, HWND hwnd, HWND startHwnd = NULL, 
 				GetWindowText(hwnd, wndName, sizeof(wndName));
 				if (!strcmp(wndName, name))
 				{
-					if (!windowHasNoChildren || (windowHasNoChildren && !GetWindow(hwnd, GW_CHILD)))
+					if (!windowHasNoChildren || !GetWindow(hwnd, GW_CHILD))
 						returnHwnd = hwnd;
 				}
 			}
@@ -2439,7 +2441,7 @@ static HWND SearchChildren (const char* name, HWND hwnd, HWND startHwnd = NULL, 
 			while (true)
 			{
 				returnHwnd = FindWindowEx(hwnd, returnHwnd, NULL, name);
-				if (!returnHwnd || !windowHasNoChildren || (windowHasNoChildren && !GetWindow(returnHwnd, GW_CHILD)))
+				if (!returnHwnd || !windowHasNoChildren || !GetWindow(returnHwnd, GW_CHILD))
 					return returnHwnd;
 			}
 		}
@@ -2503,8 +2505,8 @@ static HWND FindFloating (const char* name, bool checkForNoCaption = false, bool
 	{
 		if (GetParent(hwnd) == g_hwndParent)
 		{
-			if ((!checkForNoCaption   || (checkForNoCaption   && !(GetWindowLongPtr(hwnd, GWL_STYLE) & WS_CAPTION))) &&
-				(!windowHasNoChildren || (windowHasNoChildren && !GetWindow(hwnd, GW_CHILD)))
+			if ((!checkForNoCaption || !(GetWindowLongPtr(hwnd, GWL_STYLE) & WS_CAPTION)) &&
+				(!windowHasNoChildren || !GetWindow(hwnd, GW_CHILD))
 			)
 				return hwnd;
 		}
@@ -2570,74 +2572,30 @@ HWND FindFloatingToolbarWndByName (const char* toolbarName)
 		}
 }
 
+// IDs of child windows are the same on all platforms
+// https://forum.cockos.com/showpost.php?p=2388026&postcount=5
+enum WndControlIDs               // caption:
+{
+	main_arrange   = 0x000003E8, // trackview
+	main_ruler     = 0x000003ED, // timeline
+
+	midi_notesView = 0x000003E9, // midiview
+	midi_pianoView = 0x000003EB  // midipianoview
+};
+
 HWND GetArrangeWnd ()
 {
-	static HWND s_hwnd = NULL; /* More efficient and Justin says it's safe: http://askjf.com/index.php?q=2653s */
-
+	static HWND s_hwnd = nullptr;
 	if (!s_hwnd)
-	{
-		#ifdef _WIN32
-			if (IsLocalized())
-			{
-				char preparedName[2048];
-				PrepareLocalizedString(__localizeFunc("trackview", "DLG_102", 0), preparedName, sizeof(preparedName));
-
-				HWND wnd = SearchChildren(preparedName, g_hwndParent);
-				while (wnd)
-				{
-					char buf[256];
-					GetClassName(wnd, buf, sizeof(buf));
-					if (!strcmp(buf, "REAPERTrackListWindow"))
-					{
-						s_hwnd = wnd;
-						break;
-					}
-					wnd = SearchChildren(preparedName, g_hwndParent, wnd);
-				}
-			}
-			else
-			{
-				s_hwnd = FindWindowEx(g_hwndParent, 0, "REAPERTrackListWindow", __localizeFunc("trackview", "DLG_102", 0));
-			}
-		#else
-			return GetWindow(g_hwndParent, GW_CHILD);
-		#endif
-	}
+		s_hwnd = GetDlgItem(g_hwndParent, WndControlIDs::main_arrange);
 	return s_hwnd;
 }
 
 HWND GetRulerWndAlt ()
 {
-	static HWND s_hwnd = NULL; /* More efficient and Justin says it's safe: http://askjf.com/index.php?q=2653s */
+	static HWND s_hwnd = nullptr;
 	if (!s_hwnd)
-	{
-		#ifdef _WIN32
-			if (IsLocalized())
-			{
-				char preparedName[2048];
-				PrepareLocalizedString(__localizeFunc("timeline", "DLG_102", 0), preparedName, sizeof(preparedName));
-
-				HWND wnd = SearchChildren(preparedName, g_hwndParent);
-				while (wnd)
-				{
-					char buf[256];
-					GetClassName(wnd, buf, sizeof(buf));
-					if (!strcmp(buf, "REAPERTimeDisplay"))
-					{
-						s_hwnd = wnd;
-						break;
-					}
-					wnd = SearchChildren(preparedName, g_hwndParent, wnd);
-				}
-			}
-			else
-			{
-				s_hwnd = FindWindowEx(g_hwndParent, 0, "REAPERTimeDisplay", __localizeFunc("timeline", "DLG_102", 0));
-			}
-		#else
-			return GetWindow(GetArrangeWnd(), GW_HWNDNEXT);
-		#endif
-	}
+		s_hwnd = GetDlgItem(g_hwndParent, WndControlIDs::main_ruler);
 	return s_hwnd;
 }
 
@@ -2813,47 +2771,17 @@ HWND GetTcpTrackWnd (MediaTrack* track, bool &isContainer)
 HWND GetNotesView (HWND midiEditor)
 {
 	if (MIDIEditor_GetMode(midiEditor) != -1)
-	{
-		#ifdef _WIN32
-			static char* s_name  = (IsLocalized()) ? (NULL) : (const_cast<char*>(__localizeFunc("midiview", "midi_DLG_102", 0)));
-
-			if (IsLocalized())
-			{
-				if (!s_name)
-					AllocPreparedString(__localizeFunc("midiview", "midi_DLG_102", 0),&s_name);
-				return SearchChildren(s_name, midiEditor);
-			}
-			else
-				return FindWindowEx(midiEditor, NULL, NULL , s_name);
-		#else
-			return GetWindow(GetWindow(midiEditor, GW_CHILD), GW_HWNDNEXT);
-		#endif
-	}
+		return GetDlgItem(midiEditor, WndControlIDs::midi_notesView);
 	else
-		return NULL;
+		return nullptr;
 }
 
 HWND GetPianoView (HWND midiEditor)
 {
 	if (MIDIEditor_GetMode(midiEditor) != -1)
-	{
-		#ifdef _WIN32
-			static char* s_name  = (IsLocalized()) ? (NULL) : (const_cast<char*>(__localizeFunc("midipianoview", "midi_DLG_102", 0)));
-
-			if (IsLocalized())
-			{
-				if (!s_name)
-					AllocPreparedString(__localizeFunc("midipianoview", "midi_DLG_102", 0),&s_name);
-				return SearchChildren(s_name, midiEditor);
-			}
-			else
-				return FindWindowEx(midiEditor, NULL, NULL , s_name);
-		#else
-			return GetWindow(midiEditor, GW_CHILD);
-		#endif
-	}
+		return GetDlgItem(midiEditor, WndControlIDs::midi_pianoView);
 	else
-		return NULL;
+		return nullptr;
 }
 
 HWND GetTrackView (HWND midiEditor)

@@ -47,6 +47,7 @@
 #include "SnM_Util.h"
 #include "SnM_Window.h"
 #include "Misc/TrackSel.h"
+#include "Freeze/TimeState.h"
 #include "Snapshots/Snapshots.h"
 #include "version.h"
 
@@ -500,6 +501,7 @@ static COMMAND_T s_cmdTable[] =
 	{{ DEFACCEL, "SWS/S&M: Region Playlist - Options/Enable shuffle (only in Region Playlist)" }, "S&M_PLAYLIST_OPT_SHUFFLE_ON", SetPlaylistOptionShuffle, NULL, 0},
 	{ { DEFACCEL, "SWS/S&M: Region Playlist - Options/Disable shuffle (only in Region Playlist)" }, "S&M_PLAYLIST_OPT_SHUFFLE_OFF", SetPlaylistOptionShuffle, NULL, 1},
 	{ { DEFACCEL, "SWS/S&M: Region Playlist - Options/Toggle shuffle (only in Region Playlist)" }, "S&M_PLAYLIST_OPT_TGL_SHUFFLE", SetPlaylistOptionShuffle, NULL, -1, IsPlaylistOptionShuffle},
+	{ { DEFACCEL, "SWS/S&M: Region Playlist - Add all regions to current playlist" }, "S&M_PLAYLIST_ADD_ALL_REGIONS", AddAllRegionsToPlaylist, NULL, },
 
 	// Markers & regions ------------------------------------------------------
 	{ { DEFACCEL, "SWS/S&M: Insert marker at edit cursor" }, "S&M_INS_MARKER_EDIT", InsertMarker, NULL, 0},
@@ -744,7 +746,7 @@ static DYN_COMMAND_T s_dynCmdTable[]
 
 	{ "SWS/S&M: Go to marker %d (obeys smooth seek)", "S&M_GOTO_MARKER", GotoMarker, 0, SNM_MAX_DYN_ACTIONS, NULL}, // default: none
 	{ "SWS/S&M: Go to region %d (obeys smooth seek)", "S&M_GOTO_REGION", GotoRegion, 0, SNM_MAX_DYN_ACTIONS, NULL}, // default: none
-	{ "SWS/S&M: Go to/select region %d (obeys smooth seek)", "S&M_GOTO_SEL_REGION", GotoAnsSelectRegion, 4, SNM_MAX_DYN_ACTIONS, NULL},
+	{ "SWS/S&M: Go to/time-select region %d (obeys smooth seek)", "S&M_GOTO_SEL_REGION", GotoAnsSelectRegion, 4, SNM_MAX_DYN_ACTIONS, NULL},
 
 	{ "SWS/S&M: Dummy toggle %d", "S&M_DUMMY_TGL", Noop, 8, SNM_MAX_DYN_ACTIONS, GetFakeToggleState},
 	{ "SWS/S&M: Exclusive toggle A%d", "S&M_EXCL_TGL", ExclusiveToggle, 4, SNM_MAX_DYN_ACTIONS, GetFakeToggleState}, // not "S&M_EXCL_TGL_A" for historical reasons...
@@ -762,6 +764,12 @@ static DYN_COMMAND_T s_dynCmdTable[]
 	{ "SWS: Recall snapshot %d", "SWSSNAPSHOT_GET", GetSnapshot, 12, SNM_MAX_DYN_ACTIONS, },
 	{ "SWS: Save as snapshot %d", "SWSSNAPSHOT_SAVE", SaveSnapshot, 12, SNM_MAX_DYN_ACTIONS, },
 	{ "SWS: Select only track %d", "SWS_SEL", SelectTrack, 32, SNM_MAX_DYN_ACTIONS, },
+
+	// save/restore time & loop selection
+	{ "SWS: Save time selection, slot %d", "SWS_SAVETIME", SaveTimeSel, 5, SNM_MAX_DYN_ACTIONS},
+	{ "SWS: Restore time selection, slot %d", "SWS_RESTTIME", RestoreTimeSel, 5, SNM_MAX_DYN_ACTIONS},
+	{ "SWS: Save loop selection, slot %d", "SWS_SAVELOOP", SaveLoopSel, 5, SNM_MAX_DYN_ACTIONS},
+	{ "SWS: Restore loop selection, slot %d", "SWS_RESTLOOP", RestoreLoopSel, 5, SNM_MAX_DYN_ACTIONS},
 
 //!WANT_LOCALIZE_1ST_STRING_END
 
@@ -813,11 +821,11 @@ bool DYN_COMMAND_T::Register(const int slot) const
 void SaveDynamicActions()
 {
 	// no localization here, intentional
-	WDL_FastString iniSection, str;
-	iniSection.Set("; Set the number of actions you want below. Quit REAPER first! ===\n");
-	iniSection.AppendFormatted(512, "; Unless specified, the maximum number of actions is %d (0 will hide actions). ===\n", SNM_MAX_DYN_ACTIONS);
+	std::ostringstream iniSection;
+	iniSection << "; Set the number of actions you want below. Quit REAPER first! ===" << '\0';
+	iniSection << "; Unless specified, the maximum number of actions is " << SNM_MAX_DYN_ACTIONS << " (0 will hide actions). ===" << '\0';
 
-	WDL_String nameStr; // no fast string here: mangled buffer
+	WDL_String nameStr, str; // no fast string here: mangled buffer
 	for (const DYN_COMMAND_T &ct : s_dynCmdTable)
 	{
 		KbdSectionInfo* sec = SectionFromUniqueID(ct.uniqueSectionId);
@@ -833,11 +841,9 @@ void SaveDynamicActions()
 		str.SetFormatted(256, "%s=%d", ct.id, ct.count);
 		while (str.GetLength() < 40) str.Append(" ");
 		str.Append(" ; ");
-		iniSection.Append(str.Get());
-		iniSection.Append(nameStr.Get());
-		iniSection.Append("\n");
+		iniSection << str.Get() << nameStr.Get() << '\0';
 	}
-	SaveIniSection("NbOfActions", &iniSection, g_SNM_IniFn.Get());
+	SaveIniSection("NbOfActions", iniSection.str(), g_SNM_IniFn.Get());
 }
 
 DYN_COMMAND_T *FindDynamicAction(void (*doCommand)(COMMAND_T*))
@@ -942,23 +948,23 @@ void ExclusiveToggle(COMMAND_T* _ct)
 		for (INT_PTR i=0; i<SNM_MAX_DYN_ACTIONS; i++)
 			if (COMMAND_T* ct = SWSGetCommand(_ct->doCommand, i))
 			{
-				if (ct->accel.accel.cmd != _ct->accel.accel.cmd) {
+				if (ct->cmdId != _ct->cmdId) {
 					ct->fakeToggle = false;
-					RefreshToolbar(ct->accel.accel.cmd);
+					RefreshToolbar(ct->cmdId);
 				}
 			}
 			else
 				break;
 */
 	//JFB! enough ATM but relies on *ordered* cmds, cmd ids, etc
-	int id = _ct->accel.accel.cmd - (int)_ct->user;
+	int id = _ct->cmdId - (int)_ct->user;
 	for (int i=0; i<SNM_MAX_DYN_ACTIONS; i++)
 	{
 		if (COMMAND_T* ct = SWSGetCommandByID(id+i))
 		{
 			if ((int)ct->user == i) // real break condition
 			{
-				if (ct->accel.accel.cmd != _ct->accel.accel.cmd)
+				if (ct->cmdId != _ct->cmdId)
 					ct->fakeToggle = false;
 			}
 			else
@@ -1142,29 +1148,33 @@ void IniFileInit()
 
 void IniFileExit()
 {
-	WDL_FastString iniSection;
+	std::ostringstream iniSection;
+
+	char version[64];
+	snprintf(version, sizeof(version), "v%d.%d.%d Build %d", SWS_VERSION);
 
 	// debug info
 	// note: the character '=' is needed, SWELL's WritePrivateProfileSection() would drop these comments otherwise
-	iniSection.AppendFormatted(128, "; REAPER v%s ===\n", GetAppVersion()); 
-	iniSection.AppendFormatted(128, "; SWS/S&M Extension v%d.%d.%d Build %d ===\n", SWS_VERSION); 
-	iniSection.Append("; "); 
-	iniSection.Append(g_SNM_IniFn.Get()); 
-	iniSection.Append(" ===\n");
+	iniSection
+		<< "; REAPER v" << GetAppVersion() << " ===" << '\0'
+		<< "; SWS/S&M Extension " << version << " ===" << '\0'
+		<< "; " << g_SNM_IniFn.Get() << " ===" << '\0'
 
 	// general prefs
-	iniSection.AppendFormatted(128, "IniFileUpgrade=%d\n", SNM_INI_FILE_VERSION); 
-	iniSection.AppendFormatted(128, "MediaFileLockAudio=%d\n", g_SNM_MediaFlags&1 ? 1:0); 
-	iniSection.AppendFormatted(128, "ToolbarsAutoRefresh=%d\n", g_SNM_ToolbarRefresh ? 1:0); 
-	iniSection.AppendFormatted(128, "ToolbarsAutoRefreshFreq=%d ; in ms (min: 100, max: 5000)\n", g_SNM_ToolbarRefreshFreq);
-	iniSection.AppendFormatted(128, "BuggyPlugsSupport=%d\n", g_SNM_SupportBuggyPlug ? 1:0);
+		<< "IniFileUpgrade=" << SNM_INI_FILE_VERSION << '\0'
+		<< "MediaFileLockAudio=" << (g_SNM_MediaFlags&1 ? 1 : 0) << '\0'
+		<< "ToolbarsAutoRefresh=" << (g_SNM_ToolbarRefresh ? 1 : 0) << '\0'
+		<< "ToolbarsAutoRefreshFreq=" << g_SNM_ToolbarRefreshFreq << " ; in ms (min: 100, max: 5000)" << '\0'
+		<< "BuggyPlugsSupport=" << (g_SNM_SupportBuggyPlug ? 1 : 0) << '\0'
 #ifdef _WIN32
-	iniSection.AppendFormatted(128, "ClearTypeFont=%d\n", g_SNM_ClearType ? 1:0);
-	iniSection.AppendFormatted(SNM_MAX_PATH, "DiffTool=\"%s\"\n", g_SNM_DiffToolFn.Get());
+		<< "ClearTypeFont=" << (g_SNM_ClearType ? 1 : 0) << '\0'
+		<< "DiffTool=\"" << g_SNM_DiffToolFn.Get() << '"' << '\0'
 #endif
-	iniSection.AppendFormatted(128, "LearnPitchAndNormOSC=%d\n", g_SNM_LearnPitchAndNormOSC); 
-	iniSection.AppendFormatted(128, "Beta=%d\n", g_SNM_Beta); 
-	SaveIniSection("General", &iniSection, g_SNM_IniFn.Get());
+		<< "LearnPitchAndNormOSC=" << g_SNM_LearnPitchAndNormOSC << '\0'
+		<< "Beta=" << g_SNM_Beta << '\0'
+	;
+
+	SaveIniSection("General", iniSection.str(), g_SNM_IniFn.Get());
 
 	// save dynamic actions, if needed
 	SaveDynamicActions();

@@ -129,6 +129,7 @@ public:
 	void SetType(int _type);
 	void SetText(const char* _str, bool _addRN = true);
 	void RefreshGUI();
+	void SetFontsizeFrominiFile(); // looks for Fontsize key in S&M.ini > [Notes] section
 	void SetWrapText(bool wrap);
 	void OnCommand(WPARAM wParam, LPARAM lParam);
 	void GetMinSize(int* _w, int* _h) { *_w=MIN_DOCKWND_WIDTH; *_h=140; }
@@ -177,6 +178,7 @@ private:
 
 	NotesMarkerRegionListener m_mkrRgnListener;
 	HWND m_edit;
+	bool m_settingText;
 };
 
 #ifdef WANT_ACTION_HELP

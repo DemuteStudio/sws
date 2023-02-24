@@ -27,17 +27,24 @@
 ******************************************************************************/
 
 #include "stdafx.h"
+#include "NF_ReaScript.h"
+
+#include <taglib/fileref.h>
 #ifdef _WIN32
 #  include <cstdint> // uint32_t
 #endif
 
-#include "NF_ReaScript.h"
-#include "../SnM/SnM.h"
-#include "../Misc/Analysis.h" // #781
-#include "../Breeder/BR_Loudness.h" // #880
-#include "../SnM/SnM_Notes.h" // #755
-#include "../SnM/SnM_Project.h" // #974
+#include "../Breeder/BR_Loudness.h"
+#include "../Breeder/BR_Misc.h" // GetProjectTrackSelectionAction
+#include "../Misc/Analysis.h"
+#include "../SnM/SnM.h" // ScheduledJob
 #include "../SnM/SnM_Chunk.h" // SNM_FXSummaryParser
+#include "../SnM/SnM_Notes.h"
+#include "../SnM/SnM_Project.h" // GetProjectLoadAction, GetGlobalStartupAction
+#include "../SnM/SnM_Util.h" // SNM_NamedCommandLookup, CheckSwsMacroScriptNumCustomId
+#include "../Utility/Base64.h"
+#include "../Utility/ReaScript_Utility.hpp"
+#include "../Zoom.h" // HorizScroll
 
 // #781, peak/RMS
 double DoGetMediaItemMaxPeakAndMaxPeakPos(MediaItem* item, double* maxPeakPosOut) // maxPeakPosOut == NULL: peak only
@@ -338,159 +345,169 @@ int NF_Win32_GetSystemMetrics(int nIndex)
 	return GetSystemMetrics(nIndex);
 }
 
-// #974
-/*
-extern WDL_FastString g_globalStartupAction; extern SWSProjConfig<WDL_FastString> g_prjLoadActions;
+// get taglib audio properties (bitrate only currently)
+enum class TagLibAudioProperties {
+	bitrate = 0
+};
 
-// desc == true: return action text, false: return command ID number (native actions) or named command (extension/ReaScript)
-void NF_GetGlobalStartupAction(char* buf, int bufSize, bool desc)
+int GetTagLibAudioProperty(const char* fn, TagLibAudioProperties property)
 {
-	WDL_FastString fs;
-
-	if (!g_globalStartupAction.Get()) 
+	if (!fn || !*fn)
+		return 0;
+	TagLib::FileRef f(fn); 
+	if (!f.isNull() && f.audioProperties()) 
 	{
-		if (desc)
-			fs.Set("");
-		else
-			fs.Set("0");
-
-		snprintf(buf, bufSize, "%s", fs.Get());
-		return;
+		switch (property) 
+		{
+			case TagLibAudioProperties::bitrate: 
+				return f.audioProperties()->bitrate();	
+		}		
 	}
 
-	if  (int cmdId = SNM_NamedCommandLookup(g_globalStartupAction.Get())) 
+	return 0;
+}
+
+int NF_ReadAudioFileBitrate(const char* fn)
+{
+	return GetTagLibAudioProperty(fn, TagLibAudioProperties::bitrate);
+}
+
+
+// #974, global actions
+bool DoGetGlobalProjectAction(char* descOut, int descOut_sz, char* cmdIdOut, int cmdIdOut_sz, WDL_FastString* action)
+{
+	if (action && SNM_NamedCommandLookup(action->Get()))
 	{
-		if (desc)
-			fs.Set(kbd_getTextFromCmd(cmdId, NULL));
-		else
-			fs.Set(g_globalStartupAction.Get());
+		snprintf(descOut,  descOut_sz,  "%s", kbd_getTextFromCmd(SNM_NamedCommandLookup(action->Get()), nullptr));
+		snprintf(cmdIdOut, cmdIdOut_sz, "%s", action->Get());
+		return true;
 	}
 	else
-	{
-		if (desc)
-			fs.Set("");
-		else
-			fs.Set("0");
-	}
-	snprintf(buf, bufSize, "%s", fs.Get());
+		return false;	
 }
 
-void NF_GetGlobalStartupAction_Desc(char *buf, int bufSize)
+bool DoSetGlobalAction(const char* buf, WDL_FastString* action)
 {
-	NF_GetGlobalStartupAction(buf, bufSize, true);
-}
-void NF_GetGlobalStartupAction_CmdID(char *buf, int bufSize)
-{
-	NF_GetGlobalStartupAction(buf, bufSize, false);
+	if (action && SNM_NamedCommandLookup(buf) && !CheckSwsMacroScriptNumCustomId(buf))
+	{
+		action->Set(buf);
+		WritePrivateProfileString("Misc", "GlobalStartupAction", buf, g_SNM_IniFn.Get());
+		return true;
+	}
+	return false;
 }
 
-
-bool NF_SetGlobalStartupAction(const char * buf)
+bool DoClearGlobalAction(WDL_FastString* action)
 {
-	if (!g_globalStartupAction.Get())
-		return false;
-		
-	if (int cmdId = SNM_NamedCommandLookup(buf))
+	if (action) 
 	{
-		// more checks: http://forum.cockos.com/showpost.php?p=1252206&postcount=1618
-		if (int tstNum = CheckSwsMacroScriptNumCustomId(buf))
-		{
-			return false;
-		}
-		else
-		{
-			g_globalStartupAction.Set(buf);
-			WritePrivateProfileString("Misc", "GlobalStartupAction", buf, g_SNM_IniFn.Get());
-			return true;
-		}
+		action->Set("");
+		WritePrivateProfileString("Misc", "GlobalStartupAction", nullptr, g_SNM_IniFn.Get());
+		return true;
 	}
-	else
+	return false;
+}
+
+// #974, project actions
+bool DoSetProjectAction(const char* buf, SWSProjConfig<WDL_FastString>* action)
+{
+	if (action && SNM_NamedCommandLookup(buf) && !CheckSwsMacroScriptNumCustomId(buf))
 	{
-		return false;
+		action->Get()->Set(buf);
+		return true;
+	}	
+	return false;
+}
+
+bool DoClearProjectAction(SWSProjConfig<WDL_FastString>* action)
+{
+	if (action) {
+		action->Get()->Set("");
+		return true;
 	}
+	return false;
+}
+
+// SnM global startup action
+bool NF_GetGlobalStartupAction(char* descOut, int descOut_sz, char* cmdIdOut, int cmdIdOut_sz)
+{
+	return DoGetGlobalProjectAction(descOut, descOut_sz, cmdIdOut, cmdIdOut_sz, GetGlobalStartupAction());
+}
+
+bool NF_SetGlobalStartupAction(const char* buf)
+{
+	return DoSetGlobalAction(buf, GetGlobalStartupAction());
 }
 
 bool NF_ClearGlobalStartupAction()
 {
-	if (g_globalStartupAction.Get()) {
-		g_globalStartupAction.Set("");
-		WritePrivateProfileString("Misc", "GlobalStartupAction", NULL, g_SNM_IniFn.Get());
-		return true;
-	}
-	return false;
+	return DoClearGlobalAction(GetGlobalStartupAction());
 }
 
-
-void NF_GetProjectStartupAction(char* buf, int bufSize, bool desc)
+// SnM project startup action 
+bool NF_GetProjectStartupAction(char* descOut, int descOut_sz, char* cmdIdOut, int cmdIdOut_sz)
 {
-	WDL_FastString fs;
-	if (!g_prjLoadActions.Get()->Get())
-	{
-		if (desc)
-			fs.Set("");
-		else
-			fs.Set("0");
-
-		snprintf(buf, bufSize, "%s", fs.Get());
-		return;
-	}
-
-	if (int cmdId = SNM_NamedCommandLookup(g_prjLoadActions.Get()->Get()))
-	{
-		if (desc)
-			fs.Set(kbd_getTextFromCmd(cmdId, NULL));
-		else
-			fs.Set(g_prjLoadActions.Get()->Get());
-	}
-	else
-	{
-		if (desc)
-			fs.Set("");
-		else
-			fs.Set("0");
-	}
-	snprintf(buf, bufSize, "%s", fs.Get());
-}
-
-void NF_GetProjectStartupAction_Desc(char *buf, int bufSize)
-{
-	NF_GetProjectStartupAction(buf, bufSize, true);
-}
-void NF_GetProjectStartupAction_CmdID(char *buf, int bufSize)
-{
-	NF_GetProjectStartupAction(buf, bufSize, false);
+	return DoGetGlobalProjectAction(descOut, descOut_sz, cmdIdOut, cmdIdOut_sz, GetProjectLoadAction()->Get());
 }
 
 bool NF_SetProjectStartupAction(const char* buf)
 {
-	if (!g_prjLoadActions.Get())
-		return false;
-
-	if (int cmdId = SNM_NamedCommandLookup(buf))
-	{
-		// more checks: http://forum.cockos.com/showpost.php?p=1252206&postcount=1618
-		if (int tstNum = CheckSwsMacroScriptNumCustomId(buf))
-		{
-			return false;
-		}
-		else
-		{
-			g_prjLoadActions.Get()->Set(buf);
-			return true;
-		}
-	}
-	else
-	{
-		return false;
-	}
+	return DoSetProjectAction(buf, GetProjectLoadAction());
 }
 
 bool NF_ClearProjectStartupAction()
 {
-	if (g_prjLoadActions.Get()) {
-		g_prjLoadActions.Get()->Set("");
+	return DoClearProjectAction(GetProjectLoadAction());
+}
+
+// BR Project track selection action
+bool NF_GetProjectTrackSelectionAction(char* descOut, int descOut_sz, char* cmdIdOut, int cmdIdOut_sz)
+{
+	return DoGetGlobalProjectAction(descOut, descOut_sz, cmdIdOut, cmdIdOut_sz, GetProjectTrackSelectionAction()->Get());
+}
+
+bool NF_SetProjectTrackSelectionAction(const char* buf)
+{
+	return DoSetProjectAction(buf, GetProjectTrackSelectionAction());
+}
+
+bool NF_ClearProjectTrackSelectionAction()
+{
+	return DoClearProjectAction(GetProjectTrackSelectionAction());
+}
+
+bool NF_DeleteTakeFromItem(MediaItem* item, int takeIdx)
+{
+	SNM_TakeParserPatcher takePatcher(item);
+	return takePatcher.RemoveTake(takeIdx);
+}
+
+void NF_ScrollHorizontallyByPercentage(int amount)
+{
+	HorizScroll(amount);
+}
+
+// Base64
+bool NF_Base64_Decode(const char* base64_str, char* decodedStrOut, int)
+{
+	Base64 b64; int decodedSize;
+	if (char* decoded = b64.Decode(base64_str, &decodedSize))
+	{
+		realloc_cmd_ptr(&decodedStrOut, &decodedSize, decodedSize); // allow null bytes in output
+		memcpy(decodedStrOut, decoded, decodedSize);
 		return true;
 	}
 	return false;
 }
-*/
+
+void NF_Base64_Encode(const char* str, int str_sz, const bool usePadding, char* encodedStrOut, const int encodedStrOut_sz)
+{
+	static bool isStrSizeAccurate { atof(GetAppVersion()) >= 6.44 };
+	if (isStrSizeAccurate && str_sz > 0)
+		--str_sz; // ignore the null terminator
+	else
+		str_sz = strlen(str);
+	Base64 b64;
+	const char* encoded = b64.Encode(str, str_sz, usePadding);
+	CopyToBuffer(encoded, encodedStrOut, encodedStrOut_sz);
+}

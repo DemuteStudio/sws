@@ -247,91 +247,104 @@ static bool MousePlaybackInit (COMMAND_T* ct, bool init)
 	}
 	else
 	{
-		PreventUIRefresh(1);
+		bool rv = false;
 
-		RegisterCsurfPlayState(false, MousePlaybackPlayState); // deregister Csurf before setting playstate so it doesn't mess with our flags
-		if (g_mousePlaybackRestorePlaystate)
+		if (g_mousePlaybackActive) // only if we successfully inited
 		{
-			if (s_playPos != -1)
+			PreventUIRefresh(1);
+
+			RegisterCsurfPlayState(false, MousePlaybackPlayState); // deregister Csurf before setting playstate so it doesn't mess with our flags
+			if (g_mousePlaybackRestorePlaystate)
 			{
-				StartPlayback(s_proj, s_playPos);
-			}
-			else if (s_pausePos != -1)
-			{
-				OnPauseButtonEx(s_proj);
-				SetEditCurPos2(s_proj, s_pausePos, true, false);
+				if (s_playPos != -1)
+				{
+					StartPlayback(s_proj, s_playPos);
+				}
+				else if (s_pausePos != -1)
+				{
+					OnPauseButtonEx(s_proj);
+					SetEditCurPos2(s_proj, s_pausePos, true, false);
+				}
+				else
+				{
+					OnStopButtonEx(s_proj);
+				}
 			}
 			else
 			{
 				OnStopButtonEx(s_proj);
 			}
-		}
-		else
-		{
-			OnStopButtonEx(s_proj);
+
+			// Restore tracks' solo and mute state
+			if (s_trackSoloMuteState)
+			{
+				for (size_t i = 0; i < s_trackSoloMuteState->size(); ++i)
+				{
+					if (MediaTrack* track = GuidToTrack(&s_trackSoloMuteState->at(i).first))
+					{
+						SetMediaTrackInfo_Value(track, "I_SOLO", s_trackSoloMuteState->at(i).second >> 8);
+						SetMediaTrackInfo_Value(track, "B_MUTE", s_trackSoloMuteState->at(i).second &  0xF);
+					}
+				}
+			}
+
+			// Restore items' mute state
+			if (s_itemMuteState)
+			{
+				for (size_t i = 0; i < s_itemMuteState->size(); ++i)
+				{
+					if (MediaItem* item = GuidToItem(&s_itemMuteState->at(i).first))
+						SetMediaItemInfo_Value(item, "B_MUTE", s_itemMuteState->at(i).second);
+				}
+			}
+
+			if (g_mousePlaybackRestoreView)
+			{
+				const int viewAdvance = ConfigVar<int>("viewadvance").value_or(0);
+				if ((GetBit(viewAdvance, 3) || g_mousePlaybackForceMoveView) && (int)ct->user > 0) // Move view to edit cursor on stop (analogously applied here when starting playback from mouse cursor)
+				{
+					double arrangeStart, arrangeEnd;
+					GetSetArrangeView(s_proj, false, &arrangeStart, &arrangeEnd);
+					if (s_arrangeStart != arrangeStart || s_arrangeEnd != arrangeEnd)
+					{
+						double startPosNormalized = (s_startPos - s_arrangeStart) / (s_arrangeEnd - s_arrangeStart);
+						double currentArrangeLen  = arrangeEnd - arrangeStart;
+
+						if ((arrangeStart = s_startPos - (currentArrangeLen * startPosNormalized)) < 0)
+							arrangeStart = 0;
+						arrangeEnd = arrangeStart + currentArrangeLen;
+						GetSetArrangeView(s_proj, true, &arrangeStart, &arrangeEnd);
+					}
+				}
+			}
+
+			PreventUIRefresh(-1);
+			if (HWND midiTrackList = GetTrackView(MIDIEditor_GetActive()))
+				InvalidateRect(midiTrackList, NULL, false); // makes sure solo buttons are refreshed in MIDI editor track list
+
+			if (GetProjectStateChangeCount(s_proj) > s_projStateCount)
+			{
+				if (s_trackSoloMuteState && !s_itemMuteState)
+					Undo_OnStateChangeEx2(s_proj, __LOCALIZE("Restore tracks solo/mute state", "sws_undo"), UNDO_STATE_TRACKCFG, -1);
+				else if (!s_trackSoloMuteState && s_itemMuteState)
+					Undo_OnStateChangeEx2(s_proj, __LOCALIZE("Restore items mute state", "sws_undo"), UNDO_STATE_ITEMS, -1);
+				else if (s_trackSoloMuteState && s_itemMuteState)
+					Undo_OnStateChangeEx2(s_proj, __LOCALIZE("Restore tracks and items solo/mute state", "sws_undo"), UNDO_STATE_TRACKCFG | UNDO_STATE_ITEMS, -1);
+			}
+			rv = true;
 		}
 
-		// Restore tracks' solo and mute state
 		if (s_trackSoloMuteState)
 		{
-			for (size_t i = 0; i < s_trackSoloMuteState->size(); ++i)
-			{
-				if (MediaTrack* track = GuidToTrack(&s_trackSoloMuteState->at(i).first))
-				{
-					SetMediaTrackInfo_Value(track, "I_SOLO", s_trackSoloMuteState->at(i).second >> 8);
-					SetMediaTrackInfo_Value(track, "B_MUTE", s_trackSoloMuteState->at(i).second &  0xF);
-				}
-			}
+			delete s_trackSoloMuteState;
+			s_trackSoloMuteState = NULL;
 		}
 
-		// Restore items' mute state
 		if (s_itemMuteState)
 		{
-			for (size_t i = 0; i < s_itemMuteState->size(); ++i)
-			{
-				if (MediaItem* item = GuidToItem(&s_itemMuteState->at(i).first))
-					SetMediaItemInfo_Value(item, "B_MUTE", s_itemMuteState->at(i).second);
-			}
+			delete s_itemMuteState;
+			s_itemMuteState = NULL;
 		}
-
-		if (g_mousePlaybackRestoreView)
-		{
-			const int viewAdvance = ConfigVar<int>("viewadvance").value_or(0);
-			if ((GetBit(viewAdvance, 3) || g_mousePlaybackForceMoveView) && (int)ct->user > 0) // Move view to edit cursor on stop (analogously applied here when starting playback from mouse cursor)
-			{
-				double arrangeStart, arrangeEnd;
-				GetSetArrangeView(s_proj, false, &arrangeStart, &arrangeEnd);
-				if (s_arrangeStart != arrangeStart || s_arrangeEnd != arrangeEnd)
-				{
-					double startPosNormalized = (s_startPos - s_arrangeStart) / (s_arrangeEnd - s_arrangeStart);
-					double currentArrangeLen  = arrangeEnd - arrangeStart;
-
-					if ((arrangeStart = s_startPos - (currentArrangeLen * startPosNormalized)) < 0)
-						arrangeStart = 0;
-					arrangeEnd = arrangeStart + currentArrangeLen;
-					GetSetArrangeView(s_proj, true, &arrangeStart, &arrangeEnd);
-				}
-			}
-		}
-
-		PreventUIRefresh(-1);
-		if (HWND midiTrackList = GetTrackView(MIDIEditor_GetActive()))
-			InvalidateRect(midiTrackList, NULL, false); // makes sure solo buttons are refreshed in MIDI editor track list
-
-		if (GetProjectStateChangeCount(s_proj) > s_projStateCount)
-		{
-			if (s_trackSoloMuteState && !s_itemMuteState)
-				Undo_OnStateChangeEx2(s_proj, __LOCALIZE("Restore tracks solo/mute state", "sws_undo"), UNDO_STATE_TRACKCFG, -1);
-			else if (!s_trackSoloMuteState && s_itemMuteState)
-				Undo_OnStateChangeEx2(s_proj, __LOCALIZE("Restore items mute state", "sws_undo"), UNDO_STATE_ITEMS, -1);
-			else if (s_trackSoloMuteState && s_itemMuteState)
-				Undo_OnStateChangeEx2(s_proj, __LOCALIZE("Restore tracks and items solo/mute state", "sws_undo"), UNDO_STATE_TRACKCFG | UNDO_STATE_ITEMS, -1);
-		}
-
-		delete s_trackSoloMuteState;
-		delete s_itemMuteState;
-		s_trackSoloMuteState = NULL;
-		s_itemMuteState      = NULL;
 
 		g_activeCommand                 = NULL;
 		g_mousePlaybackActive           = false;
@@ -348,7 +361,7 @@ static bool MousePlaybackInit (COMMAND_T* ct, bool init)
 
 		s_projStateCount = 0;
 		s_proj           = NULL;
-		return true;
+		return rv;
 	}
 }
 
@@ -933,14 +946,29 @@ void DeleteTakeUnderMouse (COMMAND_T* ct)
 	BR_MouseInfo mouseInfo(BR_MouseInfo::MODE_ARRANGE | BR_MouseInfo::MODE_IGNORE_ENVELOPE_LANE_SEGMENT);
 
 	// Don't differentiate between things within the item, but ignore any track lane envelopes
-	if (!strcmp(mouseInfo.GetWindow(), "arrange") && !strcmp(mouseInfo.GetSegment(), "track") && mouseInfo.GetItem() && (!mouseInfo.GetEnvelope() || mouseInfo.IsTakeEnvelope()))
+	MediaItem* itemUnderMouse = mouseInfo.GetItem();
+	if (!strcmp(mouseInfo.GetWindow(), "arrange") && !strcmp(mouseInfo.GetSegment(), "track") && itemUnderMouse && (!mouseInfo.GetEnvelope() || mouseInfo.IsTakeEnvelope()))
 	{
-		if (CountTakes(mouseInfo.GetItem()) > 1 && !IsItemLocked(mouseInfo.GetItem()) && !IsLocked(ITEM_FULL))
+		if (!IsItemLocked(itemUnderMouse) && !IsLocked(ITEM_FULL))
 		{
-			SNM_TakeParserPatcher takePatcher(mouseInfo.GetItem());
-			takePatcher.RemoveTake(mouseInfo.GetTakeId());
-			if (takePatcher.Commit())
-				Undo_OnStateChangeEx2(NULL, SWS_CMD_SHORTNAME(ct), UNDO_STATE_ITEMS, -1);
+			if (CountTakes(itemUnderMouse) > 1)
+			{
+				SNM_TakeParserPatcher takePatcher(itemUnderMouse);
+				takePatcher.RemoveTake(mouseInfo.GetTakeId());
+				if (takePatcher.Commit())
+					Undo_OnStateChangeEx2(NULL, SWS_CMD_SHORTNAME(ct), UNDO_STATE_ITEMS, -1);
+			}
+			else if (CountTakes(itemUnderMouse) == 1) // don't delete empty items
+			// can't use TakeParserPatcher here as it would create an empty item when deleting the only take in an item
+			{
+				MediaTrack* trackUnderMouse = mouseInfo.GetTrack();
+				if (trackUnderMouse)
+				{
+					DeleteTrackMediaItem(trackUnderMouse, itemUnderMouse);
+					UpdateArrange();
+					Undo_OnStateChangeEx2(NULL, SWS_CMD_SHORTNAME(ct), UNDO_STATE_ITEMS, -1);
+				}
+			}
 		}
 	}
 }
@@ -1109,138 +1137,95 @@ void SnapFollowsGridVis (COMMAND_T* ct)
 
 void PlaybackFollowsTempoChange (COMMAND_T* ct)
 {
-	const char* configStr = "seekmodes";
-	ConfigVar<int> option(configStr);
+	ConfigVar<int> option{"seekmodes"};
 	if(!option) return;
-
 	*option = ToggleBit(*option, 5);
+	option.save();
 	RefreshToolbar(0);
-
-	char tmp[256];
-	snprintf(tmp, sizeof(tmp), "%d", *option);
-	WritePrivateProfileString("reaper", configStr, tmp, get_ini_file());
 }
 
 void TrimNewVolPanEnvs (COMMAND_T* ct)
 {
-	const char* configStr = "envtrimadjmode";
-	ConfigVar<int>(configStr).try_set((int)ct->user);
+	ConfigVar<int> option{"envtrimadjmode"};
+	if(!option) return;
+	*option = (int)ct->user;
+	option.save();
 	RefreshToolbar(0);
-
-	char tmp[256];
-	snprintf(tmp, sizeof(tmp), "%d", (int)ct->user);
-	WritePrivateProfileString("reaper", configStr, tmp, get_ini_file());
 }
 
 void ToggleDisplayItemLabels (COMMAND_T* ct)
 {
-	const char* configStr = "labelitems2";
-
-	ConfigVar<int> option(configStr);
+	ConfigVar<int> option{"labelitems2"};
 	if(!option) return;
 	*option = ToggleBit(*option, (int)ct->user);
-
-	char tmp[256];
-	snprintf(tmp, sizeof(tmp), "%d", *option);
-	WritePrivateProfileString("reaper", configStr, tmp, get_ini_file());
-
+	option.save();
 	UpdateArrange();
 }
 
 void SetMidiResetOnPlayStop (COMMAND_T* ct)
 {
-	const char* configStr = "midisendflags";
-
-	ConfigVar<int> option(configStr);
+	ConfigVar<int> option{"midisendflags"};
 	if(!option) return;
 	*option = ToggleBit(*option, (int)ct->user);
-
-	char tmp[256];
-	snprintf(tmp, sizeof(tmp), "%d", *option);
-	WritePrivateProfileString("reaper", configStr, tmp, get_ini_file());
+	option.save();
 }
 
 void SetOptionsFX (COMMAND_T* ct)
 {
 	if ((int)ct->user == 1)
 	{
-		const char* configStr = "runallonstop";
-		ConfigVar<int> option(configStr);
+		ConfigVar<int> runallonstop{"runallonstop"};
 
 		// Set only if "Run FX when stopped" is turned on (otherwise the option is disabled so we don't allow the user to change it)
-		if (option && GetBit(*option, 0))
+		if (runallonstop && GetBit(*runallonstop, 0))
 		{
-			*option = ToggleBit(*option, 3);
-
-			char tmp[256];
-			snprintf(tmp, sizeof(tmp), "%d", *option);
-			WritePrivateProfileString("reaper", configStr, tmp, get_ini_file());
+			*runallonstop = ToggleBit(*runallonstop, 3);
+			runallonstop.save();
 		}
 	}
 	else if ((int)ct->user == 2)
 	{
-		const char* configStr = "loopstopfx";
-		ConfigVar<int> option(configStr);
-		if(!option) return;
-
-		*option = ToggleBit(*option, 0);
-
-		char tmp[256];
-		snprintf(tmp, sizeof(tmp), "%d", *option);
-		WritePrivateProfileString("reaper", configStr, tmp, get_ini_file());
+		ConfigVar<int> loopstopfx{"loopstopfx"};
+		if(!loopstopfx) return;
+		*loopstopfx = ToggleBit(*loopstopfx, 0);
+		loopstopfx.save();
 	}
 	else
 	{
 		const ConfigVar<int> runallonstop("runallonstop");
 
-		// Set only if "Run FX when stopped" is turned of (otherwise the option is disabled so we don't allow the user to change it)
+		// Set only if "Run FX when stopped" is turned off (otherwise the option is disabled so we don't allow the user to change it)
 		if (runallonstop && !GetBit(*runallonstop, 0))
 		{
-			const char* configStr = "runafterstop";
-			*ConfigVar<int>(configStr) = abs((int)ct->user);
-			char tmp[256];
-			snprintf(tmp, sizeof(tmp), "%d", abs((int)ct->user));
-			WritePrivateProfileString("reaper", configStr, tmp, get_ini_file());
+			ConfigVar<int> runafterstop{"runafterstop"};
+			*runafterstop = abs((int)ct->user);
+			runafterstop.save();
 		}
 	}
 }
 
 void SetMoveCursorOnPaste (COMMAND_T* ct)
 {
-	const char* configStr = "itemclickmovecurs";
-
-	ConfigVar<int> option(configStr);
+	ConfigVar<int> option{"itemclickmovecurs"};
 	if(!option) return;
 	*option = ToggleBit(*option, abs((int)ct->user));
-
-	char tmp[256];
-	snprintf(tmp, sizeof(tmp), "%d", *option);
-	WritePrivateProfileString("reaper", configStr, tmp, get_ini_file());
+	option.save();
 }
 
 void SetPlaybackStopOptions (COMMAND_T* ct)
 {
-	const char* configStr = (int)ct->user == 0 ? "stopprojlen" : "viewadvance";
-
-	ConfigVar<int> option(configStr);
+	ConfigVar<int> option{ct->user == 0 ? "stopprojlen" : "viewadvance"};
 	if(!option) return;
 	*option = ToggleBit(*option, (int)ct->user);
-
-	char tmp[256];
-	snprintf(tmp, sizeof(tmp), "%d", *option);
-	WritePrivateProfileString("reaper", configStr, tmp, get_ini_file());
+	option.save();
 }
 
 void SetGridMarkerZOrder (COMMAND_T* ct)
 {
-	const char* configStr = (((int)ct->user > 0) ? "gridinbg" : "gridinbg2");
-
-	int option = abs((int)ct->user) - 1;
-	ConfigVar<int>(configStr).try_set(option);
-
-	char tmp[256];
-	snprintf(tmp, sizeof(tmp), "%d", option);
-	WritePrivateProfileString("reaper", configStr, tmp, get_ini_file());
+	ConfigVar<int> option{(int)ct->user > 0 ? "gridinbg" : "gridinbg2"};
+	if(!option) return;
+	*option = abs((int)ct->user) - 1;
+	option.save();
 	UpdateArrange();
 }
 
@@ -1564,6 +1549,11 @@ void ClearProjectTrackSelAction (COMMAND_T* ct)
 		MessageBox(GetMainHwnd(), msg.Get(), __LOCALIZE("Project track selection action","sws_startup_action"), MB_OK);
 		return;
 	}
+}
+
+SWSProjConfig<WDL_FastString>* GetProjectTrackSelectionAction()
+{
+	return &g_trackSelActions;
 }
 
 /******************************************************************************

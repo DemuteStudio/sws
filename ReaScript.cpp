@@ -152,6 +152,7 @@ APIdef g_apidefs[] =
 	{ APIFUNC(SNM_SetLongConfigVar), "bool", "const char*,int,int", "varname,newHighValue,newLowValue", "[S&M] Sets a 64-bit integer preference from two 32-bit integers (look in project prefs first, then in general prefs). Returns false if failed (e.g. varname not found).", },
 	{ APIFUNC(SNM_GetDoubleConfigVar), "double", "const char*,double", "varname,errvalue", "[S&M] Returns a floating-point preference (look in project prefs first, then in general prefs). Returns errvalue if failed (e.g. varname not found).", },
 	{ APIFUNC(SNM_SetDoubleConfigVar), "bool", "const char*,double", "varname,newvalue", "[S&M] Sets a floating-point preference (look in project prefs first, then in general prefs). Returns false if failed (e.g. varname not found or newvalue out of range).", },
+	{ APIFUNC(SNM_SetStringConfigVar), "bool", "const char*,const char*", "varname,newvalue", "[S&M] Sets a string preference (general prefs only). Returns false if failed (e.g. varname not found or value too long). See get_config_var_string.", },
 	{ APIFUNC(SNM_MoveOrRemoveTrackFX), "bool", "MediaTrack*,int,int", "tr,fxId,what", "[S&M] Deprecated, see TakeFX_/TrackFX_ CopyToTrack/Take, TrackFX/TakeFX _Delete (v5.95pre2+). Move or removes a track FX. Returns true if tr has been updated.\nfxId: fx index in chain or -1 for the selected fx. what: 0 to remove, -1 to move fx up in chain, 1 to move fx down in chain.", },
 	{ APIFUNC(SNM_GetProjectMarkerName), "bool", "ReaProject*,int,bool,WDL_FastString*", "proj,num,isrgn,name", "[S&M] Gets a marker/region name. Returns true if marker/region found.", },
 	{ APIFUNC(SNM_SetProjectMarker), "bool", "ReaProject*,int,bool,double,double,const char*,int", "proj,num,isrgn,pos,rgnend,name,color", "[S&M] Deprecated, see SetProjectMarker4 -- Same function as SetProjectMarker3() except it can set empty names \"\".", },
@@ -221,7 +222,7 @@ APIdef g_apidefs[] =
 	{ APIFUNC(BR_PositionAtMouseCursor), "double", "bool", "checkRuler", "[BR] Get position at mouse cursor. To check ruler along with arrange, pass checkRuler=true. Returns -1 if cursor is not over arrange/ruler.", },
 	{ APIFUNC(BR_SetArrangeView), "void", "ReaProject*,double,double", "proj,startTime,endTime", "[BR] Deprecated, see GetSet_ArrangeView2 (REAPER v5.12pre4+) -- Set start and end time position of arrange view. To get arrange view instead, see BR_GetArrangeView.", },
 	{ APIFUNC(BR_SetItemEdges), "bool", "MediaItem*,double,double", "item,startTime,endTime", "[BR] Set item start and end edges' position - returns true in case of any changes", },
-	{ APIFUNC(BR_SetMediaItemImageResource), "void", "MediaItem*,const char*,int", "item,imageIn,imageFlags", "[BR] Set image resource and its flags for a given item. To clear current image resource, pass imageIn as \"\".\nimageFlags: &1=0: don't display image, &1: center / tile, &3: stretch, &5: full height (REAPER 5.974+).\nTo get image resource, see BR_GetMediaItemImageResource.", },
+	{ APIFUNC(BR_SetMediaItemImageResource), "void", "MediaItem*,const char*,int", "item,imageIn,imageFlags", "[BR] Set image resource and its flags for a given item. To clear current image resource, pass imageIn as \"\".\nimageFlags: &1=0: don't display image, &1: center / tile, &3: stretch, &5: full height (REAPER 5.974+).\nCan also be used to display existing text in empty items unstretched (pass imageIn = \"\", imageFlags = 0) or stretched (pass imageIn = \"\". imageFlags = 3).\nTo get image resource, see BR_GetMediaItemImageResource.", },
 	{ APIFUNC(BR_SetMediaSourceProperties), "bool", "MediaItem_Take*,bool,double,double,double,bool", "take,section,start,length,fade,reverse", "[BR] Set take media source properties. Returns false if take can't have them (MIDI items etc.). Section parameters have to be valid only when passing section=true.\nTo get source properties, see BR_GetMediaSourceProperties." },
 	{ APIFUNC(BR_SetMediaTrackLayouts), "bool", "MediaTrack*,const char*,const char*", "track,mcpLayoutNameIn,tcpLayoutNameIn", "[BR] Deprecated, see GetSetMediaTrackInfo (REAPER v5.02+). Set media track layouts for MCP and TCP. To set default layout, pass empty string (\"\") as layout name. In case layouts were successfully set, returns true (if layouts are already set to supplied layout names, it will return false since no changes were made).\nTo get media track layouts, see BR_GetMediaTrackLayouts.", },
 	{ APIFUNC(BR_SetMidiTakeTempoInfo), "bool", "MediaItem_Take*,bool,double,int,int", "take,ignoreProjTempo,bpm,num,den", "[BR] Set \"ignore project tempo\" information for MIDI take. Returns true in case the take was successfully updated.", },
@@ -229,7 +230,7 @@ APIdef g_apidefs[] =
 	{ APIFUNC(BR_SetTakeSourceFromFile2), "bool", "MediaItem_Take*,const char*,bool,bool", "take,filenameIn,inProjectData,keepSourceProperties", "[BR] Differs from <a href=\"#BR_SetTakeSourceFromFile\">BR_SetTakeSourceFromFile</a> only that it can also preserve existing take media source properties.", },
 	{ APIFUNC(BR_TakeAtMouseCursor), "MediaItem_Take*", "double*", "positionOut", "[BR] Get take under mouse cursor. Position is mouse cursor position in arrange.", },
 	{ APIFUNC(BR_TrackAtMouseCursor), "MediaTrack*", "int*,double*", "contextOut,positionOut", "[BR] Get track under mouse cursor.\nContext signifies where the track was found: 0 = TCP, 1 = MCP, 2 = Arrange.\nPosition will hold mouse cursor position in arrange if applicable.", },
-	{ APIFUNC(BR_TrackFX_GetFXModuleName), "bool", "MediaTrack*,int,char*,int", "track,fx,nameOut,nameOut_sz", "[BR] Get the exact name (like effect.dll, effect.vst3, etc...) of an FX.", },
+	{ APIFUNC(BR_TrackFX_GetFXModuleName), "bool", "MediaTrack*,int,char*,int", "track,fx,nameOut,nameOut_sz", "[BR] Deprecated, see TrackFX_GetNamedConfigParm/'fx_ident' (v6.37+). Get the exact name (like effect.dll, effect.vst3, etc...) of an FX.", },
 	{ APIFUNC(BR_Win32_CB_FindString), "int", "void*,int,const char*", "comboBoxHwnd,startId,string", "[BR] Equivalent to win32 API ComboBox_FindString().", },
 	{ APIFUNC(BR_Win32_CB_FindStringExact), "int", "void*,int,const char*", "comboBoxHwnd,startId,string", "[BR] Equivalent to win32 API ComboBox_FindStringExact().", },
 	{ APIFUNC(BR_Win32_ClientToScreen), "void", "void*,int,int,int*,int*", "hwnd,xIn,yIn,xOut,yOut", "[BR] Equivalent to win32 API ClientToScreen().", },
@@ -244,8 +245,8 @@ APIdef g_apidefs[] =
 	{ APIFUNC(BR_Win32_GetMixerHwnd), "void*", "bool*", "isDockedOut", "[BR] Get mixer window HWND. isDockedOut will be set to true if mixer is docked", },
 	{ APIFUNC(BR_Win32_GetMonitorRectFromRect), "void", "bool,int,int,int,int,int*,int*,int*,int*", "workingAreaOnly,leftIn,topIn,rightIn,bottomIn,leftOut,topOut,rightOut,bottomOut", "[BR] Get coordinates for screen which is nearest to supplied coordinates. Pass workingAreaOnly as true to get screen coordinates excluding taskbar (or menu bar on OSX).", },
 	{ APIFUNC(BR_Win32_GetParent), "void*", "void*", "hwnd", "[BR] Equivalent to win32 API GetParent().", },
-	{ APIFUNC(BR_Win32_GetPrivateProfileString), "int", "const char*,const char*,const char*,const char*,char*,int", "sectionName,keyName,defaultString,filePath,stringOut,stringOut_sz", "[BR] Equivalent to win32 API GetPrivateProfileString(). For example, you can use this to get values from REAPER.ini", },
-	{ APIFUNC(BR_Win32_WritePrivateProfileString), "bool", "const char*,const char*,const char*,const char*", "sectionName,keyName,value,filePath", "[BR] Equivalent to win32 API WritePrivateProfileString(). For example, you can use this to write to REAPER.ini", },
+	{ APIFUNC(BR_Win32_GetPrivateProfileString), "int", "const char*,const char*,const char*,const char*,char*,int", "sectionName,keyName,defaultString,filePath,stringOut,stringOut_sz", "[BR] Equivalent to win32 API GetPrivateProfileString(). For example, you can use this to get values from REAPER.ini.", },
+	{ APIFUNC(BR_Win32_WritePrivateProfileString), "bool", "const char*,const char*,const char*,const char*", "sectionName,keyName,value,filePath", "[BR] Equivalent to win32 API WritePrivateProfileString(). For example, you can use this to write to REAPER.ini. You can pass an empty string as value to delete a key.", },
 
 	{ APIFUNC(BR_Win32_GetWindow), "void*", "void*,int", "hwnd,cmd", "[BR] Equivalent to win32 API GetWindow().", },
 	{ APIFUNC(BR_Win32_GetWindowLong), "int", "void*,int", "hwnd,index", "[BR] Equivalent to win32 API GetWindowLong().", },
@@ -280,29 +281,49 @@ APIdef g_apidefs[] =
 
 	// *** nofish stuff ***
 	// #781
-	{ APIFUNC(NF_GetMediaItemMaxPeak), "double", "MediaItem*", "item", "Returns the greatest max. peak value of all active channels of an audio item active take, post item gain, post take volume envelope, post-fade, pre fader, pre item FX. \n Returns -150.0 if MIDI take or empty item.", },
+	{ APIFUNC(NF_GetMediaItemMaxPeak), "double", "MediaItem*", "item", "Returns the greatest max. peak value in dBFS of all active channels of an audio item active take, post item gain, post take volume envelope, post-fade, pre fader, pre item FX. \n Returns -150.0 if MIDI take or empty item.", },
 	{ APIFUNC(NF_GetMediaItemMaxPeakAndMaxPeakPos), "double", "MediaItem*,double*", "item,maxPeakPosOut", "See <a href=\"#NF_GetMediaItemMaxPeak\">NF_GetMediaItemMaxPeak</a>, additionally returns maxPeakPos (relative to item position).", }, // #953
-	{ APIFUNC(NF_GetMediaItemPeakRMS_Windowed), "double", "MediaItem*", "item", "Returns the average RMS peak level of all active channels of an audio item active take, post item gain, post take volume envelope, post-fade, pre fader, pre item FX. \n Obeys 'Window size for peak RMS' setting in 'SWS: Set RMS analysis/normalize options' for calculation. Returns -150.0 if MIDI take or empty item.", },
-	{ APIFUNC(NF_GetMediaItemPeakRMS_NonWindowed), "double", "MediaItem*", "item", "Returns the greatest overall (non-windowed) RMS peak level of all active channels of an audio item active take, post item gain, post take volume envelope, post-fade, pre fader, pre item FX. \n Returns -150.0 if MIDI take or empty item.", },
-	{ APIFUNC(NF_GetMediaItemAverageRMS), "double", "MediaItem*", "item", "Returns the average overall (non-windowed) RMS level of active channels of an audio item active take, post item gain, post take volume envelope, post-fade, pre fader, pre item FX. \n Returns -150.0 if MIDI take or empty item.", },
+	{ APIFUNC(NF_GetMediaItemPeakRMS_Windowed), "double", "MediaItem*", "item", "Returns the average dB RMS peak level of all active channels of an audio item active take, post item gain, post take volume envelope, post-fade, pre fader, pre item FX. \n Obeys 'Window size for peak RMS' setting in 'SWS: Set RMS analysis/normalize options' for calculation. Returns -150.0 if MIDI take or empty item.", },
+	{ APIFUNC(NF_GetMediaItemPeakRMS_NonWindowed), "double", "MediaItem*", "item", "Returns the greatest overall (non-windowed) dB RMS peak level of all active channels of an audio item active take, post item gain, post take volume envelope, post-fade, pre fader, pre item FX. \n Returns -150.0 if MIDI take or empty item.", },
+	{ APIFUNC(NF_GetMediaItemAverageRMS), "double", "MediaItem*", "item", "Returns the average overall (non-windowed) dB RMS level of active channels of an audio item active take, post item gain, post take volume envelope, post-fade, pre fader, pre item FX. \n Returns -150.0 if MIDI take or empty item.", },
 	{ APIFUNC(NF_AnalyzeMediaItemPeakAndRMS), "bool", "MediaItem*,double,void*,void*,void*,void*", "item,windowSize,reaper.array_peaks,reaper.array_peakpositions,reaper.array_RMSs,reaper.array_RMSpositions", "This function combines all other NF_Peak/RMS functions in a single one and additionally returns peak RMS positions. Lua example code <a href=\"https://forum.cockos.com/showpost.php?p=2050961&postcount=6\">here</a>. Note: It's recommended to use this function with ReaScript/Lua as it provides reaper.array objects. If using this function with other scripting languages, you must provide arrays in the <a href=\"https://forum.cockos.com/showpost.php?p=2039829&postcount=2\">reaper.array</a> format.", },
 
 	// #880
 	{ APIFUNC(NF_AnalyzeTakeLoudness_IntegratedOnly), "bool", "MediaItem_Take*,double*", "take,lufsIntegratedOut", "Does LUFS integrated analysis only. Faster than full loudness analysis (<a href=\"#NF_AnalyzeTakeLoudness\">NF_AnalyzeTakeLoudness</a>) . Use this if only LUFS integrated is required. Take vol. env. is taken into account. See: <a href=\"http://wiki.cockos.com/wiki/index.php/Measure_and_normalize_loudness_with_SWS\">Signal flow</a>", },
-	{ APIFUNC(NF_AnalyzeTakeLoudness), "bool", "MediaItem_Take*,bool,double*,double*,double*,double*,double*,double*", "take,analyzeTruePeak,lufsIntegratedOut,rangeOut, truePeakOut,truePeakPosOut,shortTermMaxOut,momentaryMaxOut", "Full loudness analysis. retval: returns true on successful analysis, false on MIDI take or when analysis failed for some reason. analyzeTruePeak=true: Also do true peak analysis. Returns true peak value and true peak position (relative to item position). Considerably slower than without true peak analysis (since it uses oversampling). Note: Short term uses a time window of 3 sec. for calculation. So for items shorter than this shortTermMaxOut can't be calculated correctly. Momentary uses a time window of 0.4 sec. ", },
-	{ APIFUNC(NF_AnalyzeTakeLoudness2), "bool", "MediaItem_Take*,bool,double*,double*,double*,double*,double*,double*,double*,double*", "take,analyzeTruePeak,lufsIntegratedOut,rangeOut, truePeakOut,truePeakPosOut,shortTermMaxOut,momentaryMaxOut,shortTermMaxPosOut,momentaryMaxPosOut", "Same as <a href=\"#NF_AnalyzeTakeLoudness\">NF_AnalyzeTakeLoudness</a> but additionally returns shortTermMaxPos and momentaryMaxPos (in absolute project time). Note: shortTermMaxPos and momentaryMaxPos actaully indicate the beginning of time <i>intervalls</i>, (3 sec. and 0.4 sec. resp.). ", },
+	{ APIFUNC(NF_AnalyzeTakeLoudness), "bool", "MediaItem_Take*,bool,double*,double*,double*,double*,double*,double*", "take,analyzeTruePeak,lufsIntegratedOut,rangeOut, truePeakOut,truePeakPosOut,shortTermMaxOut,momentaryMaxOut", "Full loudness analysis. retval: returns true on successful analysis, false on MIDI take or when analysis failed for some reason. analyzeTruePeak=true: Also do true peak analysis. Returns true peak value in dBTP and true peak position (relative to item position). Considerably slower than without true peak analysis (since it uses oversampling). Note: Short term uses a time window of 3 sec. for calculation. So for items shorter than this shortTermMaxOut can't be calculated correctly. Momentary uses a time window of 0.4 sec. ", },
+	{ APIFUNC(NF_AnalyzeTakeLoudness2), "bool", "MediaItem_Take*,bool,double*,double*,double*,double*,double*,double*,double*,double*", "take,analyzeTruePeak,lufsIntegratedOut,rangeOut, truePeakOut,truePeakPosOut,shortTermMaxOut,momentaryMaxOut,shortTermMaxPosOut,momentaryMaxPosOut", "Same as <a href=\"#NF_AnalyzeTakeLoudness\">NF_AnalyzeTakeLoudness</a> but additionally returns shortTermMaxPos and momentaryMaxPos (in absolute project time). Note: shortTermMaxPos and momentaryMaxPos indicate the beginning of time <i>intervalls</i>, (3 sec. and 0.4 sec. resp.). ", },
 
 	// #755 SWS Notes, MarkerRegionSubs
 	{ APIFUNC(NF_GetSWSTrackNotes), "const char*", "MediaTrack*", "track", "", },
 	{ APIFUNC(NF_SetSWSTrackNotes), "void", "MediaTrack*,const char*", "track,str", "", },
 	{ APIFUNC(NF_GetSWSMarkerRegionSub), "const char*", "int", "markerRegionIdx", "Returns SWS/S&M marker/region subtitle. markerRegionIdx: Refers to index that can be passed to <a href=\"#EnumProjectMarkers\">EnumProjectMarkers</a> (not displayed marker/region index). Returns empty string if marker/region with specified index not found or marker/region subtitle not set. Lua code example <a href=\"https://github.com/ReaTeam/ReaScripts-Templates/blob/master/Markers%20and%20Regions/NF_Get%20SWS%20markers%20and%20regions%20notes.lua\">here</a>.", },
 	{ APIFUNC(NF_SetSWSMarkerRegionSub), "bool", "const char*,int", "markerRegionSub,markerRegionIdx", "Set SWS/S&M marker/region subtitle. markerRegionIdx: Refers to index that can be passed to <a href=\"#EnumProjectMarkers\">EnumProjectMarkers</a> (not displayed marker/region index). Returns true if subtitle is set successfully (i.e. marker/region with specified index is present in project). Lua code example <a href=\"https://github.com/ReaTeam/ReaScripts-Templates/blob/master/Markers%20and%20Regions/NF_Get%20SWS%20markers%20and%20regions%20notes.lua\">here</a>.", },
-	{ APIFUNC(NF_UpdateSWSMarkerRegionSubWindow), "void", "", "", "Redraw the Notes window (call if you've changed a subtitle via <a href=\"NF_SetSWSMarkerRegionSub\">NF_SetSWSMarkerRegionSub</a> which is currently displayed in the Notes window and you want to appear the new subtitle immediately.)", },
+	{ APIFUNC(NF_UpdateSWSMarkerRegionSubWindow), "void", "", "", "Redraw the Notes window (call if you've changed a subtitle via <a href=\"#NF_SetSWSMarkerRegionSub\">NF_SetSWSMarkerRegionSub</a> which is currently displayed in the Notes window and you want to appear the new subtitle immediately.)", },
 
-	{ APIFUNC(NF_TakeFX_GetFXModuleName), "bool", "MediaItem*,int,char*,int", "item,fx,nameOut,nameOut_sz", "See BR_TrackFX_GetFXModuleName. fx: counted consecutively across all takes (zero-based).", },
-	{ APIFUNC(NF_Win32_GetSystemMetrics), "int", "int", "nIndex", "Equivalent to win32 API GetSystemMetrics().", },
+	{ APIFUNC(NF_TakeFX_GetFXModuleName), "bool", "MediaItem*,int,char*,int", "item,fx,nameOut,nameOut_sz", "Deprecated, see TakeFX_GetNamedConfigParm/'fx_ident' (v6.37+). See BR_TrackFX_GetFXModuleName. fx: counted consecutively across all takes (zero-based).", },
+	{ APIFUNC(NF_Win32_GetSystemMetrics), "int", "int", "nIndex", "Equivalent to win32 API GetSystemMetrics(). Note: Only SM_C[XY]SCREEN, SM_C[XY][HV]SCROLL and SM_CYMENU are currently supported on macOS and Linux as of REAPER 6.68. Check the <a href=\"https://github.com/justinfrankel/WDL/blob/main/WDL/swell\">SWELL source code</a> for up-to-date support information (swell-wnd.mm, swell-wnd-generic.cpp).", },
 	{ APIFUNC(NF_GetSWS_RMSoptions), "void", "double*,double*", "targetOut,windowSizeOut", "Get SWS analysis/normalize options. See <a href=\"#NF_SetSWS_RMSoptions\">NF_SetSWS_RMSoptions</a>.", },
 	{ APIFUNC(NF_SetSWS_RMSoptions), "bool", "double,double", "targetLevel,windowSize", "Set SWS analysis/normalize options (same as running action 'SWS: Set RMS analysis/normalize options'). targetLevel: target RMS normalize level (dB), windowSize: window size for peak RMS (sec.)", },
+	{ APIFUNC(NF_ReadAudioFileBitrate), "int", "const char*", "fn", "Returns the bitrate of an audio file in kb/s if available (0 otherwise). For supported filetypes see <a href=\"https://taglib.org/api/classTagLib_1_1AudioProperties.html#ae5b7650b50f8c8f8cc022f25cfee48c5\">TagLib::AudioProperties::bitrate</a>.", },
+
+	// #974, SnM Global/Project startup actions
+	{ APIFUNC(NF_GetGlobalStartupAction), "bool", "char*,int,char*,int", "descOut,descOut_sz,cmdIdOut,cmdIdOut_sz", "Gets action description and command ID number (for native actions) or named command IDs / identifier strings (for extension actions /ReaScripts) if global startup action is set, otherwise empty string. Returns false on failure.", },
+	{ APIFUNC(NF_SetGlobalStartupAction), "bool", "const char*", "str", "Returns true if global startup action was set successfully (i.e. valid action ID). Note: For SWS / S&M actions and macros / scripts, you must use identifier strings (e.g. \"_SWS_ABOUT\", \"_f506bc780a0ab34b8fdedb67ed5d3649\"), not command IDs (e.g. \"47145\").\nTip: to copy such identifiers, right-click the action in the Actions window > Copy selected action cmdID / identifier string.\nNOnly works for actions / scripts from Main action section.", },
+	{ APIFUNC(NF_ClearGlobalStartupAction), "bool", "", "", "Returns true if global startup action was cleared successfully.", },
+	{ APIFUNC(NF_GetProjectStartupAction), "bool", "char*,int,char*,int", "descOut,descOut_sz,cmdIdOut,cmdIdOut_sz", "Gets action description and command ID number (for native actions) or named command IDs / identifier strings (for extension actions /ReaScripts) if project startup action is set, otherwise empty string. Returns false on failure.", },
+	{ APIFUNC(NF_SetProjectStartupAction), "bool", "const char*", "str", "Returns true if project startup action was set successfully (i.e. valid action ID). Note: For SWS / S&M actions and macros / scripts, you must use identifier strings (e.g. \"_SWS_ABOUT\", \"_f506bc780a0ab34b8fdedb67ed5d3649\"), not command IDs (e.g. \"47145\").\nTip: to copy such identifiers, right-click the action in the Actions window > Copy selected action cmdID / identifier string.\nOnly works for actions / scripts from Main action section. Project must be saved after setting project startup action to be persistent.", },
+	{ APIFUNC(NF_ClearProjectStartupAction), "bool", "", "", "Returns true if project startup action was cleared successfully.", },
+	// #974, BR Project track selection action
+	{ APIFUNC(NF_GetProjectTrackSelectionAction), "bool", "char*,int,char*,int", "descOut,descOut_sz,cmdIdOut,cmdIdOut_sz", "Gets action description and command ID number (for native actions) or named command IDs / identifier strings (for extension actions /ReaScripts) if project track selection action is set, otherwise empty string. Returns false on failure.", },
+	{ APIFUNC(NF_SetProjectTrackSelectionAction), "bool", "const char*", "str", "Returns true if project track selection action was set successfully (i.e. valid action ID). Note: For SWS / S&M actions and macros / scripts, you must use identifier strings (e.g. \"_SWS_ABOUT\", \"_f506bc780a0ab34b8fdedb67ed5d3649\"), not command IDs (e.g. \"47145\").\nTip: to copy such identifiers, right-click the action in the Actions window > Copy selected action cmdID / identifier string.\nOnly works for actions / scripts from Main action section. Project must be saved after setting project track selection action to be persistent.", },
+	{ APIFUNC(NF_ClearProjectTrackSelectionAction), "bool", "", "", "Returns true if project track selection action was cleared successfully.", },
+
+	{ APIFUNC(NF_DeleteTakeFromItem), "bool", "MediaItem*,int", "item,takeIdx", "Deletes a take from an item. takeIdx is zero-based. Returns true on success.", },
+	{ APIFUNC(NF_ScrollHorizontallyByPercentage), "void", "int", "amount", "100 means scroll one page. Negative values scroll left.", },
+
+	// Base64
+	{ APIFUNC(NF_Base64_Decode), "bool","const char*,char*,int", "base64Str,decodedStrOutNeedBig,decodedStrOutNeedBig_sz", "Returns true on success.", },
+	{ APIFUNC(NF_Base64_Encode), "void","const char*,int,bool,char*,int", "str,str_sz,usePadding,encodedStrOutNeedBig,encodedStrOutNeedBig_sz", "Input string may contain null bytes in REAPER 6.44 or newer. Note: Doesn't allow padding in the middle (e.g. concatenated encoded strings), doesn't allow newlines.", },
 	// /*** nofish stuff ***
 
 	{ APIFUNC(SN_FocusMIDIEditor), "void", "", "", "Focuses the active/open MIDI editor.", },
@@ -314,23 +335,55 @@ APIdef g_apidefs[] =
 	{ APIFUNC(CF_LocateInExplorer), "bool", "const char*", "file", "Select the given file in explorer/finder.", },
 
 	{ APIFUNC(CF_GetTrackFXChain), "FxChain*", "MediaTrack*", "track", "Return a handle to the given track FX chain window.", },
+	{ APIFUNC(CF_GetTrackFXChainEx), "FxChain*", "ReaProject*,MediaTrack*,bool", "project,track,wantInputChain", "Return a handle to the given track FX chain window. Set wantInputChain to get the track's input/monitoring FX chain.", },
 	{ APIFUNC(CF_GetTakeFXChain), "FxChain*", "MediaItem_Take*", "take", "Return a handle to the given take FX chain window. HACK: This temporarily renames the take in order to disambiguate the take FX chain window from similarily named takes.", },
 	{ APIFUNC(CF_GetFocusedFXChain), "FxChain*", "", "", "Return a handle to the currently focused FX chain window.", },
 	{ APIFUNC(CF_EnumSelectedFX), "int", "FxChain*,int", "hwnd,index", "Return the index of the next selected effect in the given FX chain. Start index should be -1. Returns -1 if there are no more selected effects.", },
 	{ APIFUNC(CF_SelectTrackFX), "bool", "MediaTrack*,int", "track,index", "Set which track effect is active in the track's FX chain. The FX chain window does not have to be open.", },
 
 	{ APIFUNC(CF_GetSWSVersion), "void", "char*,int", "versionOut,versionOut_sz", "Return the current SWS version number.", },
+	{ APIFUNC(CF_GetCustomColor), "int", "int", "index", "Get one of 16 SWS custom colors (0xBBGGRR on Windows, 0xRRGGBB everyhwere else). Index is zero-based.", },
+	{ APIFUNC(CF_SetCustomColor), "void", "int,int", "index,color", "Set one of 16 SWS custom colors (0xBBGGRR on Windows, 0xRRGGBB everyhwere else). Index is zero-based.", },
 
-	{ APIFUNC(CF_EnumerateActions), "int", "int,int,char*,int", "section,index,nameOut,nameOut_sz", "Wrapper for the unexposed kbd_enumerateActions API function.\nMain=0, Main (alt recording)=100, MIDI Editor=32060, MIDI Event List Editor=32061, MIDI Inline Editor=32062, Media Explorer=32063", },
-	{ APIFUNC(CF_GetCommandText), "const char*", "int,int", "section,command", "Wrapper for the unexposed kbd_getTextFromCmd API function. See <a href='#CF_EnumerateActions'>CF_EnumerateActions</a> for common section IDs.", },
+	{ APIFUNC(CF_EnumerateActions), "int", "int,int,char*,int", "section,index,nameOut,nameOut_sz", "Deprecated, see kbd_enumerateActions (v6.71+). Wrapper for the unexposed kbd_enumerateActions API function.\nMain=0, Main (alt recording)=100, MIDI Editor=32060, MIDI Event List Editor=32061, MIDI Inline Editor=32062, Media Explorer=32063", },
+	{ APIFUNC(CF_GetCommandText), "const char*", "int,int", "section,command", "Deprecated, see kbd_getTextFromCmd (v6.71+). Wrapper for the unexposed kbd_getTextFromCmd API function. See <a href='#CF_EnumerateActions'>CF_EnumerateActions</a> for common section IDs.", },
 
 	{ APIFUNC(CF_GetMediaSourceBitDepth), "int", "PCM_source*", "src", "Returns the bit depth if available (0 otherwise).", },
+	{ APIFUNC(CF_GetMediaSourceBitRate), "double", "PCM_source*", "src", "Returns the bit rate for WAVE (wav, aif) and streaming/variable formats (mp3, ogg, opus). REAPER v6.19 or later is required for non-WAVE formats.", },
 	{ APIFUNC(CF_GetMediaSourceOnline), "bool", "PCM_source*", "src", "Returns the online/offline status of the given source.", },
 	{ APIFUNC(CF_SetMediaSourceOnline), "void", "PCM_source*,bool", "src,set", "Set the online/offline status of the given source (closes files when set=false).", },
 	{ APIFUNC(CF_GetMediaSourceMetadata), "bool", "PCM_source*,const char*,char*,int", "src,name,out,out_sz", "Get the value of the given metadata field (eg. DESC, ORIG, ORIGREF, DATE, TIME, UMI, CODINGHISTORY for BWF).", },
 	{ APIFUNC(CF_GetMediaSourceRPP), "bool", "PCM_source*,char*,int", "src,fnOut,fnOut_sz", "Get the project associated with this source (BWF, subproject...).", },
-	{ APIFUNC(CF_EnumMediaSourceCues), "int", "PCM_source*,int,double*,double*,bool*,char*,int", "src,index,timeOut,endTimeOut,isRegionOut,nameOut,nameOut_sz", "Enumerate the source's media cues. Returns the next index or 0 when finished.", },
+	{ APIFUNC(CF_EnumMediaSourceCues), "int", "PCM_source*,int,double*,double*,bool*,char*,int,bool*", "src,index,timeOut,endTimeOut,isRegionOut,nameOut,nameOut_sz,isChapterOut", "Enumerate the source's media cues. Returns the next index or 0 when finished.", },
 	{ APIFUNC(CF_ExportMediaSource), "bool", "PCM_source*,const char*", "src,fn", "Export the source to the given file (MIDI only).", },
+	{ APIFUNC(CF_PCM_Source_SetSectionInfo), "bool", "PCM_source*,PCM_source*,double,double,bool", "section,source,offset,length,reverse", "Give a section source created using PCM_Source_CreateFromType(\"SECTION\"). Offset and length are ignored if 0. Negative length to subtract from the total length of the source." },
+
+	{ APIFUNC(CF_CreatePreview), "CF_Preview*", "PCM_source*", "source", R"(Create a new preview object. Does not take ownership of the source (don't forget to destroy it unless it came from a take!). See CF_Preview_Play and the others CF_Preview_* functions.
+
+The preview object is automatically destroyed at the end of a defer cycle if at least one of these conditions are met:
+- playback finished
+- playback was not started using CF_Preview_Play
+- the output track no longer exists)", },
+	{ APIFUNC(CF_Preview_GetValue), "bool", "CF_Preview*,const char*,double*", "preview,name,valueOut", R"(Supported attributes:
+B_LOOP         seek to the beginning when reaching the end of the source
+B_PPITCH       preserve pitch when changing playback rate
+D_FADEINLEN    lenght in seconds of playback fade in
+D_FADEOUTLEN   lenght in seconds of playback fade out
+D_LENGTH       (read only) length of the source * playback rate
+D_MEASUREALIGN >0 = wait until the next bar before starting playback (note: this causes playback to silently continue when project is paused and previewing through a track)
+D_PAN          playback pan
+D_PITCH        pitch adjustment in semitones
+D_PLAYRATE     playback rate
+D_POSITION     current playback position
+D_VOLUME       playback volume
+I_OUTCHAN      first hardware output channel (&1024=mono, reads -1 when playing through a track, see CF_Preview_SetOutputTrack)
+I_PITCHMODE    highest 16 bits=pitch shift mode (see EnumPitchShiftModes), lower 16 bits=pitch shift submode (see EnumPitchShiftSubModes))", },
+	{ APIFUNC(CF_Preview_GetPeak), "bool", "CF_Preview*,int,double*", "preview,channel,peakvolOut", "Read peak volume for channel 0 or 1. Only available when outputting to a hardware output (not through a track).", },
+	{ APIFUNC(CF_Preview_SetValue), "bool", "CF_Preview*,const char*,double", "preview,name,newValue", "See CF_Preview_GetValue.", },
+	{ APIFUNC(CF_Preview_SetOutputTrack), "bool", "CF_Preview*,ReaProject*,MediaTrack*", "preview,project,track", "", },
+	{ APIFUNC(CF_Preview_Play), "bool", "CF_Preview*", "preview", "Start playback of the configured preview object.", },
+	{ APIFUNC(CF_Preview_Stop), "bool", "CF_Preview*", "preview", "Stop and destroy a preview object.", },
+	{ APIFUNC(CF_Preview_StopAll), "void", "", "", "Stop and destroy all currently active preview objects.", },
 
 	{ NULL, } // denote end of table
 };
