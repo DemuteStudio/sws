@@ -174,8 +174,8 @@ APIdef g_apidefs[] =
 	{ APIFUNC(FNG_FreeMidiTake), "void", "RprMidiTake*", "midiTake", "[FNG] Commit changes to MIDI take and free allocated memory", },
 	{ APIFUNC(FNG_CountMidiNotes), "int", "RprMidiTake*", "midiTake", "[FNG] Count of how many MIDI notes are in the MIDI take", },
 	{ APIFUNC(FNG_GetMidiNote), "RprMidiNote*", "RprMidiTake*,int", "midiTake,index", "[FNG] Get a MIDI note from a MIDI take at specified index", },
-	{ APIFUNC(FNG_GetMidiNoteIntProperty), "int", "RprMidiNote*,const char*", "midiNote,property", "[FNG] Get MIDI note property", },
-	{ APIFUNC(FNG_SetMidiNoteIntProperty), "void", "RprMidiNote*,const char*,int", "midiNote,property,value", "[FNG] Set MIDI note property", },
+	{ APIFUNC(FNG_GetMidiNoteIntProperty), "int", "RprMidiNote*,const char*", "midiNote,property", "[FNG] Get MIDI note property. Supported properties: CHANNEL, LENGTH, MUTED, PITCH, POSITION, SELECTED and VELOCITY.", },
+	{ APIFUNC(FNG_SetMidiNoteIntProperty), "void", "RprMidiNote*,const char*,int", "midiNote,property,value", "[FNG] Set MIDI note property. See FNG_GetMidiNoteIntProperty for the list of supported properties.", },
 	{ APIFUNC(FNG_AddMidiNote), "RprMidiNote*", "RprMidiTake*", "midiTake", "[FNG] Add MIDI note to MIDI take", },
 
 	{ APIFUNC(BR_EnvAlloc), "BR_Envelope*", "TrackEnvelope*,bool", "envelope,takeEnvelopesUseProjectTime", "[BR] Allocate envelope object from track or take envelope pointer. Always call <a href=\"#BR_EnvFree\">BR_EnvFree</a> when done to release the object and commit changes if needed.\n takeEnvelopesUseProjectTime: take envelope points' positions are counted from take position, not project start time. If you want to work with project time instead, pass this as true.\n\nFor further manipulation see BR_EnvCountPoints, BR_EnvDeletePoint, BR_EnvFind, BR_EnvFindNext, BR_EnvFindPrevious, BR_EnvGetParentTake, BR_EnvGetParentTrack, BR_EnvGetPoint, BR_EnvGetProperties, BR_EnvSetPoint, BR_EnvSetProperties, BR_EnvValueAtPos.", },
@@ -259,7 +259,7 @@ APIdef g_apidefs[] =
 	{ APIFUNC(BR_Win32_GetWindow), "void*", "void*,int", "hwnd,cmd", "[BR] Equivalent to win32 API GetWindow().", },
 	{ APIFUNC(BR_Win32_GetWindowLong), "int", "void*,int", "hwnd,index", "[BR] Equivalent to win32 API GetWindowLong().", },
 	{ APIFUNC(BR_Win32_GetWindowRect), "bool", "void*,int*,int*,int*,int*", "hwnd,leftOut,topOut,rightOut,bottomOut", "[BR] Equivalent to win32 API GetWindowRect().", },
-	{ APIFUNC(BR_Win32_GetWindowText), "int", "void*,char*,int", "hwnd,textOut,textOut_sz", "[BR] Equivalent to win32 API GetWindowText().", },
+	{ APIFUNC(BR_Win32_GetWindowText), "int", "void*,char*,int", "hwnd,textOutNeedBig,textOutNeedBig_sz", "[BR] Equivalent to win32 API GetWindowText().", },
 	{ APIFUNC(BR_Win32_HIBYTE), "int", "int", "value", "[BR] Equivalent to win32 API HIBYTE().", },
 	{ APIFUNC(BR_Win32_HIWORD), "int", "int", "value", "[BR] Equivalent to win32 API HIWORD().", },
 	{ APIFUNC(BR_Win32_HwndToString), "void", "void*,char*,int", "hwnd,stringOut,stringOut_sz", "[BR] Convert HWND to string. To convert string back to HWND, see BR_Win32_StringToHwnd.", },
@@ -274,7 +274,7 @@ APIdef g_apidefs[] =
 	{ APIFUNC(BR_Win32_MAKEWPARAM), "int", "int,int", "low,high", "[BR] Equivalent to win32 API MAKEWPARAM().", },
 	{ APIFUNC(BR_Win32_MIDIEditor_GetActive), "void*", "", "", "[BR] Alternative to <a href=\"#MIDIEditor_GetActive\">MIDIEditor_GetActive</a>. REAPER seems to have problems with extensions using HWND type for exported functions so all BR_Win32 functions use void* instead of HWND type.", },
 	{ APIFUNC(BR_Win32_ScreenToClient), "void", "void*,int,int,int*,int*", "hwnd,xIn,yIn,xOut,yOut", "[BR] Equivalent to win32 API ClientToScreen().", },
-	{ APIFUNC(BR_Win32_SendMessage), "int", "void*,int,int,int", "hwnd,msg,lParam,wParam", "[BR] Equivalent to win32 API SendMessage().", },
+	{ APIFUNC(BR_Win32_SendMessage), "int", "void*,int,int,int", "hwnd,msg,wParam,lParam", "[BR] Equivalent to win32 API SendMessage().", },
 	{ APIFUNC(BR_Win32_SetFocus), "void*", "void*", "hwnd", "[BR] Equivalent to win32 API SetFocus().", },
 	{ APIFUNC(BR_Win32_SetForegroundWindow), "int", "void*", "hwnd", "[BR] Equivalent to win32 API SetForegroundWindow().", },
 	{ APIFUNC(BR_Win32_SetWindowLong), "int", "void*,int,int", "hwnd,index,newLong", "[BR] Equivalent to win32 API SetWindowLong().", },
@@ -381,7 +381,9 @@ Mode values:
   * 1 = decomposition + canonical composition
 - Bit 1 (decomposition mode):
   * 0 = canonical decomposition
-  * 1 = compatibility decomposition)", },
+  * 1 = compatibility decomposition
+
+Warning: this function is no-op on Windows XP (the input string is returned as-is).)", },
 
 	{ APIFUNC(CF_CreatePreview), "CF_Preview*", "PCM_source*", "source", R"(Create a new preview object. Does not take ownership of the source (don't forget to destroy it unless it came from a take!). See CF_Preview_Play and the others CF_Preview_* functions.
 
@@ -392,8 +394,8 @@ The preview object is automatically destroyed at the end of a defer cycle if at 
 	{ APIFUNC(CF_Preview_GetValue), "bool", "CF_Preview*,const char*,double*", "preview,name,valueOut", R"(Supported attributes:
 B_LOOP         seek to the beginning when reaching the end of the source
 B_PPITCH       preserve pitch when changing playback rate
-D_FADEINLEN    lenght in seconds of playback fade in
-D_FADEOUTLEN   lenght in seconds of playback fade out
+D_FADEINLEN    length in seconds of playback fade in
+D_FADEOUTLEN   length in seconds of playback fade out
 D_LENGTH       (read only) length of the source * playback rate
 D_MEASUREALIGN >0 = wait until the next bar before starting playback (note: this causes playback to silently continue when project is paused and previewing through a track)
 D_PAN          playback pan

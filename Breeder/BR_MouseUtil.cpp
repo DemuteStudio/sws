@@ -624,13 +624,10 @@ void BR_MouseInfo::GetContext (const POINT& p)
 							// if env is hit, check if underlying envelope outside of automation items is bypassed, #1727
 							if (trackEnvHit)
 							{
-								int bypassUnderlEnvProjDefault = *ConfigVar<int>("pooledenvattach") & 4;
-								int AIoptions = envelope.GetAIoptions(); // -1 == use project default
-								if ((bypassUnderlEnvProjDefault && AIoptions == -1) || (AIoptions & 4))
-								{
-									if (!this->IsMouseOverAI(envelope, height - 2 * ENV_GAP, offset + ENV_GAP, mouseY, mousePos))
-										trackEnvHit = 0;
-								}
+								int aiOptions = envelope.GetAIoptions(); // -1 == use project default
+								if (aiOptions < 0) aiOptions = *ConfigVar<int>("pooledenvattach");
+								if (aiOptions & 4 && !this->IsMouseOverAI(envelope, height - 2 * ENV_GAP, offset + ENV_GAP, mouseY, mousePos))
+									trackEnvHit = 0;
 							}
 						}
 
@@ -681,16 +678,11 @@ void BR_MouseInfo::GetContext (const POINT& p)
 							else if (trackEnvHit == 2) mouseInfo.details = "env_segment";
 
 							// if env is hit, check if underlying envelope outside of automation items is bypassed, #1488
-							int bypassUnderlEnvProjDefault = *ConfigVar<int>("pooledenvattach") & 4;
 							BR_Envelope envelope(mouseInfo.envelope);
-							int AIoptions = envelope.GetAIoptions(); // -1 == use project default
-							if ((bypassUnderlEnvProjDefault && AIoptions == -1) || (AIoptions & 4))
-							{
-								if (!this->IsMouseOverAI(envelope, height - 2 * ENV_GAP, offset + ENV_GAP, mouseY, mousePos))
-								{
-									mouseInfo.details = "empty";
-								}
-							}
+							int aiOptions = envelope.GetAIoptions(); // -1 == use project default
+							if (aiOptions < 0) aiOptions = *ConfigVar<int>("pooledenvattach");
+							if (aiOptions & 4 && !this->IsMouseOverAI(envelope, height - 2 * ENV_GAP, offset + ENV_GAP, mouseY, mousePos))
+								mouseInfo.details = "empty";
 						}
 						// Item and things inside it
 						if (!trackEnvHit && mouseInfo.item)
@@ -782,6 +774,9 @@ bool BR_MouseInfo::GetContextMIDI (POINT p, HWND hwnd, BR_MouseInfo::MouseInfo& 
 		ScreenToClient(segmentHwnd, &p);
 		RECT r; GetClientRect(segmentHwnd, &r);
 
+		const auto dpi256 = hidpi::GetDpiForWindow(mouseInfo.midiEditor);
+		const LONG ruler_h = MIDI_RULER_H * dpi256 / 256;
+
 		// ignoring extra flags from GetPianoRoll() (eg. custom note order mode=0x10000)
 		mouseInfo.pianoRollMode = midiEditor.GetPianoRoll() & 0xffff;
 
@@ -810,7 +805,7 @@ bool BR_MouseInfo::GetContextMIDI (POINT p, HWND hwnd, BR_MouseInfo::MouseInfo& 
 			}
 
 			// Check ruler
-			if (p.y < MIDI_RULER_H)
+			if (p.y < ruler_h)
 			{
 				if      (cursorSegment == MIDI_WND_NOTEVIEW) mouseInfo.segment = "ruler";
 				else if (cursorSegment == MIDI_WND_KEYBOARD) mouseInfo.segment = "unknown";
@@ -875,7 +870,7 @@ bool BR_MouseInfo::GetContextMIDI (POINT p, HWND hwnd, BR_MouseInfo::MouseInfo& 
 					else if (cursorSegment == MIDI_WND_NOTEVIEW) mouseInfo.segment = "notes";
 
 					// This is mouse Y position counting from the bottom - make sure it's not outside valid, drawable note range
-					int realMouseY = (MIDI_RULER_H - p.y) - ((midiEditor.GetVPos() - 128) * midiEditor.GetVZoom());
+					int realMouseY = (ruler_h - p.y) - ((midiEditor.GetVPos() - 128) * midiEditor.GetVZoom());
 					if (realMouseY > 0)
 					{
 						bool processKeyboardSeparately = true;
